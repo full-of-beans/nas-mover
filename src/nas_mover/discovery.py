@@ -19,6 +19,14 @@ class Pool:
     min_free_bytes: int
 
 
+def _parse_options(raw_options: str) -> dict[str, str | bool]:
+    options: dict[str, str | bool] = {}
+    for option in raw_options.split(","):
+        key, separator, value = option.partition("=")
+        options[key] = value if separator else True
+    return options
+
+
 def parse_fstab(path: Path, mount_override: Path | None = None) -> Pool:
     entries: list[tuple[str, str, str]] = []
     for raw_line in path.read_text().splitlines():
@@ -38,13 +46,62 @@ def parse_fstab(path: Path, mount_override: Path | None = None) -> Pool:
     if len(entries) != 1:
         raise RuntimeError("More than one matching mergerfs entry exists")
     source, mountpoint, raw_options = entries[0]
-    options: dict[str, str | bool] = {}
-    for option in raw_options.split(","):
-        key, separator, value = option.partition("=")
-        options[key] = value if separator else True
+    options = _parse_options(raw_options)
     return Pool(
         Path(mountpoint),
         [Path(branch) for branch in source.split(":")],
+        options,
+        parse_size(str(options["minfreespace"])) if "minfreespace" in options else 0,
+    )
+
+
+def discover_runtime_pool(
+    mountpoint: Path,
+    runner=subprocess.run,
+    runtime_attribute: str = "user.mergerfs.branches",
+) -> Pool:
+    """Discover the active mergerfs topology from the mounted filesystem.
+
+    mergerfs branches are mutable at runtime, so the mount's original source (and
+    especially /etc/fstab) can be stale.  The control xattr is authoritative for
+    the current branch list; findmnt supplies the active mount options.
+    """
+    require_mount(mountpoint, runner)
+    fstype = runner(
+        ["findmnt", "-n", "-o", "FSTYPE", "--target", str(mountpoint)],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    if fstype != "fuse.mergerfs":
+        raise RuntimeError(f"Required mount is not mergerfs: {mountpoint} ({fstype or 'unknown'})")
+
+    control_file = mountpoint / ".mergerfs"
+    result = runner(
+        ["getfattr", "--only-values", "-n", runtime_attribute, "--", str(control_file)],
+        check=True, capture_output=True, text=True,
+    )
+    raw_branches = result.stdout.strip()
+    if not raw_branches:
+        raise RuntimeError("mergerfs returned an empty runtime branch list")
+
+    branches: list[Path] = []
+    for entry in raw_branches.split(":"):
+        if "=" not in entry:
+            raise RuntimeError(f"Invalid mergerfs runtime branch entry: {entry!r}")
+        path, mode = entry.rsplit("=", 1)
+        if mode != "RW" or not path.startswith("/"):
+            raise RuntimeError(f"Unexpected mergerfs runtime branch entry: {entry!r}")
+        branches.append(Path(path))
+    if len(set(branches)) != len(branches):
+        raise RuntimeError("mergerfs returned duplicate runtime branches")
+
+    raw_options = runner(
+        ["findmnt", "-n", "-o", "OPTIONS", "--target", str(mountpoint)],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    options = _parse_options(raw_options)
+    return Pool(
+        mountpoint,
+        branches,
         options,
         parse_size(str(options["minfreespace"])) if "minfreespace" in options else 0,
     )

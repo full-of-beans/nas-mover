@@ -10,6 +10,7 @@ from nas_mover.discovery import (
     Pool,
     backing_source,
     discover_branches,
+    discover_runtime_pool,
     parse_fstab,
     require_mount,
     rotational_for_path,
@@ -128,6 +129,54 @@ def test_parse_fstab_rejects_missing_or_ambiguous_pool(tmp_path: Path) -> None:
         parse_fstab(fstab)
 
 
+def test_runtime_pool_uses_active_mergerfs_branches_and_options(tmp_path: Path) -> None:
+    mount = tmp_path / "pool"
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        if command[0] == "mountpoint":
+            return SimpleNamespace(returncode=0, stdout="")
+        if command[0] == "getfattr":
+            return SimpleNamespace(returncode=0, stdout="/ssd1=RW:/ssd2=RW:/hdd=RW\n")
+        if command[3] == "FSTYPE":
+            return SimpleNamespace(returncode=0, stdout="fuse.mergerfs\n")
+        if command[3] == "OPTIONS":
+            return SimpleNamespace(returncode=0, stdout="rw,minfreespace=20G,category.create=ff\n")
+        raise AssertionError(command)
+
+    pool = discover_runtime_pool(mount, runner)
+    assert pool == Pool(
+        mount, [Path("/ssd1"), Path("/ssd2"), Path("/hdd")],
+        {"rw": True, "minfreespace": "20G", "category.create": "ff"}, 20 * 1024**3,
+    )
+    assert [command[0] for command in calls] == ["mountpoint", "findmnt", "getfattr", "findmnt"]
+
+
+def test_runtime_pool_rejects_non_mergerfs_and_bad_branches(tmp_path: Path) -> None:
+    mount = tmp_path / "pool"
+
+    def non_mergerfs(command, **kwargs):
+        if command[0] == "mountpoint":
+            return SimpleNamespace(returncode=0, stdout="")
+        return SimpleNamespace(returncode=0, stdout="ext4\n")
+
+    with pytest.raises(RuntimeError, match="not mergerfs"):
+        discover_runtime_pool(mount, non_mergerfs)
+
+    def bad_branch(command, **kwargs):
+        if command[0] == "mountpoint":
+            return SimpleNamespace(returncode=0, stdout="")
+        if command[0] == "getfattr":
+            return SimpleNamespace(returncode=0, stdout="/ssd=RO\n")
+        if command[3] == "FSTYPE":
+            return SimpleNamespace(returncode=0, stdout="fuse.mergerfs\n")
+        return SimpleNamespace(returncode=0, stdout="rw,minfreespace=20G\n")
+
+    with pytest.raises(RuntimeError, match="Unexpected mergerfs"):
+        discover_runtime_pool(mount, bad_branch)
+
+
 def test_discovery_checks_mounts_devices_and_capacity(tmp_path: Path) -> None:
     def runner(*args, **kwargs):
         command = args[0]
@@ -185,6 +234,21 @@ def test_cli_is_dry_run_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     assert run(["--live", "--fstab", str(fstab), "--mount", "/pool", "--lock", str(lock)]) == 0
     assert execute.called
+
+
+def test_cli_uses_runtime_pool_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    branches = [
+        Branch(tmp_path / "ssd1", 0, False, 100, 100, 0),
+        Branch(tmp_path / "ssd2", 1, False, 100, 100, 0),
+        Branch(tmp_path / "hdd", 2, True, 100, 100, 0),
+    ]
+    seen = SimpleNamespace(mount=None)
+    pool = Pool(Path("/mnt/nas/data"), [branch.path for branch in branches], {}, 0)
+    monkeypatch.setattr("nas_mover.cli.discover_runtime_pool", lambda mount: (setattr(seen, "mount", mount), pool)[1])
+    monkeypatch.setattr("nas_mover.cli.discover_branches", lambda value: branches)
+    monkeypatch.setattr("nas_mover.cli.plan_moves", lambda *args, **kwargs: [])
+    assert run(["--lock", str(tmp_path / "lock")]) == 0
+    assert seen.mount == Path("/mnt/nas/data")
 
 
 def test_cli_rejects_escaping_scope(tmp_path: Path) -> None:

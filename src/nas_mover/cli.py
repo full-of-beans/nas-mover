@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .config import MoverConfig
-from .discovery import discover_branches, parse_fstab
+from .discovery import discover_branches, discover_runtime_pool, parse_fstab
 from .locking import process_lock
 from .models import PoolConfig
 from .planner import plan_moves
@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Balance mergerfs SSD storage and spill excess to HDD.")
     parser.add_argument("--live", action="store_true", help="Apply the plan; dry-run is the default.")
     parser.add_argument("--config", type=str, default=None, help="Path to an editable TOML configuration file.")
-    parser.add_argument("--fstab", type=str, default=None, help="Override the configured fstab path.")
+    parser.add_argument("--fstab", type=str, default=None, help="Use a mergerfs entry from this fstab instead of runtime discovery (testing/staging).")
     parser.add_argument("--mount", type=str, default=None, help="Override the configured mergerfs mountpoint.")
     parser.add_argument("--lock", type=str, default=None, help="Override the configured lock path for testing or staging.")
     parser.add_argument("--scope", type=str, default=None, help="Restrict planning to a relative branch directory.")
@@ -42,7 +42,10 @@ def run(argv: Sequence[str] | None = None) -> int:
         raise ValueError("scope must be a relative directory inside each branch")
     config.validate()
     with process_lock(config.lock_path):
-        pool = parse_fstab(config.fstab_path, config.mount_override)
+        if args.fstab:
+            pool = parse_fstab(config.fstab_path, config.mount_override)
+        else:
+            pool = discover_runtime_pool(config.mount_override or Path("/mnt/nas/data"))
         branches = discover_branches(pool)
         ssds = [branch for branch in branches if not branch.rotational]
         hdds = [branch for branch in branches if branch.rotational]

@@ -17,8 +17,8 @@ after a copy and verification succeed.
 - The **pool mountpoint** is the unified directory users access, such as
   `/mnt/nas/data`.
 - A **policy** decides which eligible branch receives a destination file.
-- `minfreespace` reserves space on a branch; this mover honors that value from
-  fstab.
+- `minfreespace` reserves space on a branch; the mover reads the active value
+  from mergerfs runtime control metadata.
 - The mover uses `findmnt` and `lsblk` to identify whether each branch is SSD
   (`ROTA=0`) or HDD (`ROTA=1`).
 
@@ -62,15 +62,30 @@ change files.
 
 ## Configure Your NAS
 
-The tool can discover the standard `/etc/fstab` location automatically. If
-there is exactly one `fuse.mergerfs` entry, its mountpoint is selected. If
-there are multiple pools, set `mount_override` in the config or pass `--mount`.
+Production discovery is runtime-based. The selected mergerfs pool must already
+be mounted. `nas-mover` validates that the target is a `fuse.mergerfs` mount,
+then reads the current branch list from `user.mergerfs.branches` on the pool's
+`.mergerfs` control file. This matters because branch membership may change at
+runtime and `/etc/fstab` can be stale or intentionally contain no mergerfs
+entry.
 
-Inspect your own mergerfs configuration before installing the mover:
+The mover also reads the active `minfreespace` reserve from mergerfs runtime
+metadata. Some FUSE mounts do not expose mergerfs-specific options through
+`findmnt`, so `user.mergerfs.minfreespace` is the authoritative fallback. If
+no runtime reserve can be determined, runtime discovery fails closed rather
+than silently assuming zero reserve.
+
+For the production NAS, configure the pool explicitly:
+
+```toml
+mount_override = "/mnt/nas/data"
+```
+
+Inspect the active pool before installing or troubleshooting the mover:
 
 ```bash
-sudo grep -n 'fuse\.mergerfs' /etc/fstab
-findmnt -t fuse.mergerfs
+findmnt -n -o FSTYPE,OPTIONS --target /mnt/nas/data
+sudo getfattr -d -m 'user\.mergerfs\..*' -- /mnt/nas/data/.mergerfs
 ```
 
 The following is an example branch layout, not a required layout:
@@ -84,14 +99,12 @@ The following is an example branch layout, not a required layout:
 /mnt/nas/hdd6-data/data
 ```
 
-Parity filesystems should not be listed as mergerfs data branches. Check your
-own fstab entry for `minfreespace`; the mover honors that reserve.
+Parity filesystems should not be mergerfs data branches. The program checks
+that the selected pool and every active branch are mounted. It does not mount,
+unlock, or repair filesystems.
 
-The program reads `/etc/fstab` by default and checks that the selected pool and
-every branch are mounted. If fstab contains exactly one mergerfs entry, its
-mountpoint is selected automatically. If there are multiple entries, use
-`mount_override` in the config or `--mount` to select one explicitly. The
-program does not mount, unlock, or repair filesystems.
+`--fstab` is retained as an explicit compatibility/testing path. It is not the
+production discovery source.
 
 ## Install On The NAS
 
@@ -100,7 +113,7 @@ environment:
 
 ```bash
 sudo apt update
-sudo apt install -y git python3 python3-venv python3-pip
+sudo apt install -y git python3 python3-venv python3-pip attr
 
 sudo mkdir -p /opt/nas-mover
 sudo chown "$USER:$USER" /opt/nas-mover
@@ -113,13 +126,15 @@ python -m pip install --upgrade pip
 python -m pip install -e '.[test]'
 ```
 
+The `attr` package provides `getfattr`, which runtime mergerfs discovery uses.
+
 ### Host configuration
 
 Copy [config.example.toml](config.example.toml) to `/etc/nas-mover/config.toml`
 and edit the host-specific values. The file is TOML, so lines beginning with
 `#` are comments. Paths, percentages, policy, age filtering, reserve space,
-and verification mode are all documented there. The loader rejects unknown
-keys and invalid enum values.
+and verification mode are documented there. The loader rejects unknown keys
+and invalid enum values.
 
 ```bash
 sudo install -d -m 0755 /etc/nas-mover
@@ -127,20 +142,19 @@ sudo cp config.example.toml /etc/nas-mover/config.toml
 sudoedit /etc/nas-mover/config.toml
 ```
 
-Use it explicitly. With one mergerfs pool, the mountpoint is auto-detected:
+Run it explicitly. Normal execution remains dry-run:
 
 ```bash
 sudo /opt/nas-mover/.venv/bin/nas-mover \
   --config /etc/nas-mover/config.toml
 ```
 
-For multiple mergerfs pools, set `mount_override` in the config or select one
-for a single run:
+For a one-off alternate pool, use `--mount`:
 
 ```bash
 sudo /opt/nas-mover/.venv/bin/nas-mover \
   --config /etc/nas-mover/config.toml \
-  --mount /mnt/nas/data
+  --mount /path/to/other/mergerfs/pool
 ```
 
 CLI flags such as `--fstab`, `--mount`, `--scope`, and `--lock` override the
@@ -168,12 +182,12 @@ python -m pytest
 ```
 
 The suite uses real temporary files for transfer behavior and mocks Linux
-commands in unit tests. The commands below exercise your actual fstab,
-mountpoint, branch devices, permissions, and mergerfs layout.
+commands in unit tests. The commands below exercise the actual mounted pool,
+branch devices, permissions, and mergerfs runtime layout.
 
 Choose a relative scope that is unused on every data branch, for example
-`mover-test/source`. Create that directory on each branch listed by your
-mergerfs fstab entry. Then run the one-command validation:
+`mover-test/source`. Create that directory on each active data branch. Then run
+the one-command validation:
 
 ```bash
 sudo /opt/nas-mover/.venv/bin/nas-mover-test-suite \
@@ -185,7 +199,7 @@ sudo /opt/nas-mover/.venv/bin/nas-mover-test-suite \
 This command:
 
 - Runs the full pytest suite.
-- Discovers the real fstab pool, mounts, branches, and SSD/HDD types.
+- Discovers the active mergerfs pool, branches, mounts, and SSD/HDD types.
 - Creates six named fixture files only in the scoped test directory on the
   first SSD branch.
 - Plans only files under that relative scope.
@@ -195,16 +209,14 @@ This command:
 
 The harness refuses to overwrite existing `test-*.bin` fixtures. Do not use a
 scope containing production files. The `--live` flag is intentionally required.
-The harness uses a zero watermark only for these six controlled fixtures;
-that does not change the production default of `80%`.
-
-Before the live command, you may omit `--live` to create fixtures, print the
-scoped plan, and clean them up without moving files:
+The harness uses a zero watermark only for these six controlled fixtures; that
+does not change the production default of `80%`.
 
 To run the same setup and scoped dry run without moving files, omit `--live`:
 
 ```bash
 sudo /opt/nas-mover/.venv/bin/nas-mover-test-suite \
+  --config /etc/nas-mover/config.toml \
   --scope mover-test/source
 ```
 
@@ -221,12 +233,11 @@ Always start with a dry run and review every proposed path:
 
 ```bash
 sudo /opt/nas-mover/.venv/bin/nas-mover \
-  --fstab /etc/fstab
+  --config /etc/nas-mover/config.toml
 ```
 
-For a selected pool, add `--mount /path/to/mergerfs/mount`. The `--scope`
-option is for controlled testing and is relative to every mergerfs branch;
-absolute paths and `..` traversal are rejected.
+The `--scope` option is for controlled testing and is relative to every
+mergerfs branch; absolute paths and `..` traversal are rejected.
 
 Do not use `--watermark 0 --tolerance 0` for normal operation. Those overrides
 exist only to force a controlled test plan with tiny fixture files.
@@ -244,7 +255,7 @@ src/nas_mover/models.py       domain data structures
 src/nas_mover/policy.py       destination policies
 src/nas_mover/planner.py      scanning and move planning
 src/nas_mover/transfer.py     copy, verify, replace, delete
-src/nas_mover/discovery.py    Linux fstab and device discovery
+src/nas_mover/discovery.py    runtime mergerfs and device discovery
 src/nas_mover/locking.py      POSIX process lock
 src/nas_mover/config.py       validated defaults and parsing
 src/nas_mover/cli.py          dry-run/live mover command
@@ -278,7 +289,8 @@ options:
   -h, --help            show this help message and exit
   --live                Apply the plan; dry-run is the default.
   --config CONFIG       Path to an editable TOML configuration file.
-  --fstab FSTAB         Override the configured fstab path.
+  --fstab FSTAB         Use fstab compatibility/testing discovery instead of
+                        runtime mergerfs discovery.
   --mount MOUNT         Override the configured mergerfs mountpoint.
   --lock LOCK           Override the configured lock path for testing or
                         staging.
@@ -317,7 +329,7 @@ Run pytest and a scoped NAS mover integration test.
 options:
   -h, --help       show this help message and exit
   --config CONFIG  Path to an editable TOML configuration file.
-  --fstab FSTAB
+  --fstab FSTAB    Use fstab compatibility/testing discovery.
   --mount MOUNT
   --scope SCOPE    Relative test directory on every branch.
   --lock LOCK

@@ -10,7 +10,7 @@ watermark_percent = 80.0
 tolerance_percent = 2.0
 
 # Destination policy for SSD-to-HDD moves. Valid values:
-#   ff      first eligible branch in fstab order
+#   ff      first eligible branch in runtime mergerfs branch order
 #   all     same branch selection as ff
 #   rand    random eligible branch
 #   pfrd    weighted random selection based on free space
@@ -33,7 +33,7 @@ policy = "eplfs"
 min_file_age_hours = 0.0
 
 # Additional percentage of each HDD's total capacity to keep free.
-# The larger of this value and mergerfs minfreespace is used. Production default: 0.0.
+# The larger of this value and active mergerfs minfreespace is used. Production default: 0.0.
 extra_free_percent = 0.0
 
 # Copy verification mode. Valid values: "size" or "sha256".
@@ -41,8 +41,10 @@ extra_free_percent = 0.0
 verification = "size"
 
 # Host-specific Linux paths.
-# /etc/fstab is the standard Linux fstab location and is auto-detected by default.
+# Runtime discovery reads active mergerfs branches and minfreespace from the
+# mounted pool's .mergerfs control xattrs. Set this to the production pool.
+mount_override = "/mnt/nas/data"
+
+# fstab_path is retained only for the explicit --fstab compatibility/testing path.
 fstab_path = "/etc/fstab"
-# Set mount_override only when fstab contains more than one mergerfs pool.
-# mount_override = "/mnt/nas/data"
 lock_path = "/run/lock/nas-mover.lock"

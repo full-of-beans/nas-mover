@@ -63,8 +63,9 @@ def discover_runtime_pool(
     """Discover the active mergerfs topology from the mounted filesystem.
 
     mergerfs branches are mutable at runtime, so the mount's original source (and
-    especially /etc/fstab) can be stale.  The control xattr is authoritative for
-    the current branch list; findmnt supplies the active mount options.
+    especially /etc/fstab) can be stale. The control xattrs are authoritative for
+    the current branch list and runtime minfreespace reserve. findmnt is used to
+    validate the active filesystem and retain any mount options it exposes.
     """
     require_mount(mountpoint, runner)
     fstype = runner(
@@ -99,12 +100,25 @@ def discover_runtime_pool(
         check=True, capture_output=True, text=True,
     ).stdout.strip()
     options = _parse_options(raw_options)
-    return Pool(
-        mountpoint,
-        branches,
-        options,
-        parse_size(str(options["minfreespace"])) if "minfreespace" in options else 0,
-    )
+
+    if "minfreespace" in options:
+        min_free_bytes = parse_size(str(options["minfreespace"]))
+    else:
+        min_free_raw = runner(
+            ["getfattr", "--only-values", "-n", "user.mergerfs.minfreespace", "--", str(control_file)],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        if not min_free_raw:
+            raise RuntimeError("mergerfs returned an empty runtime minfreespace value")
+        try:
+            min_free_bytes = int(min_free_raw)
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid mergerfs runtime minfreespace value: {min_free_raw!r}") from exc
+        if min_free_bytes < 0:
+            raise RuntimeError(f"Invalid mergerfs runtime minfreespace value: {min_free_raw!r}")
+        options["minfreespace"] = min_free_raw
+
+    return Pool(mountpoint, branches, options, min_free_bytes)
 
 
 def require_mount(path: Path, runner=subprocess.run) -> None:

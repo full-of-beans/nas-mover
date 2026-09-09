@@ -1,94 +1,103 @@
 # nas-mover
 
-`nas-mover` is a Linux command-line tool for moving files between tiers in a
-mergerfs pool. It is intended for a NAS with fast SSD landing/cache branches
-and larger HDD data branches.
+`nas-mover` plans and executes file moves between branches of a live mergerfs pool. It is intended for a NAS with fast SSD landing branches and larger HDD data branches.
 
-The mover does not replace mergerfs and does not run SnapRAID. mergerfs still
-provides the unified mount and its normal file-placement behavior. This tool
-looks at the individual branches, plans selected moves, and performs them only
-after a copy and verification succeed.
+It does **not** own routine maintenance scheduling, UPS policy, SnapRAID, parity lifecycle, filesystem mounting/unlocking, enclosure power, or Stage 1 outage orchestration. Those integration responsibilities belong to `nas-config` under the accepted homelab ADRs.
 
-## How It Works
+## Ownership boundary
 
-### Mergerfs terms
+```text
+                nas-config
+                   |
+         bounded routine window
+         AC/lifecycle admission
+         cooperative stop deadline
+                   |
+                   v
+               nas-mover
+        plan + transfer files only
+                   |
+          +--------+--------+
+          |        |        |
+          v        v        v
+        hdd1     hdd3     hdd4 ...
+      serial    serial    serial
+       queue     queue     queue
 
-- A **branch** is one directory or mounted filesystem supplied to mergerfs.
-- The **pool mountpoint** is the unified directory users access, such as
-  `/mnt/nas/data`.
-- A **policy** decides which eligible branch receives a destination file.
-- `minfreespace` reserves space on a branch; the mover reads the active value
-  from mergerfs runtime control metadata.
-- The mover uses `findmnt` and `lsblk` to identify whether each branch is SSD
-  (`ROTA=0`) or HDD (`ROTA=1`).
+Distinct destination HDD queues may execute concurrently.
+Moves to the same destination HDD remain serialized.
+```
 
-### Planning behavior
+`nas-config` may run the mover for a bounded routine window or invoke it manually for a longer/full drain. `nas-mover` itself should remain useful independently of that scheduler.
+
+## Current versus target execution
+
+The current CLI executes planned moves sequentially:
+
+```text
+move 1 -> complete
+move 2 -> complete
+move 3 -> complete
+...
+```
+
+The accepted target is destination-aware concurrency for SSD-to-HDD moves:
+
+```text
+planner output
+    |
+    +--> hdd1 queue --> one worker
+    +--> hdd3 queue --> one worker
+    +--> hdd4 queue --> one worker
+    +--> hdd6 queue --> one worker
+```
+
+Rules for the target implementation:
+
+- the planner chooses each destination before execution;
+- execution must not re-run placement policy independently in workers;
+- at most one active transfer targets a given HDD;
+- workers for different destination HDDs may run in parallel;
+- the natural concurrency ceiling is the number of distinct destination HDDs in the plan, currently at most four;
+- SSD-to-SSD balancing may remain serialized initially;
+- cancellation stops workers from accepting new work and waits for all active workers to converge before process exit.
+
+This design uses independent HDD write bandwidth without creating simultaneous write/seek contention on one destination disk.
+
+## Planning behavior
 
 The planner works in two phases:
 
-1. If one SSD is above the watermark and another is materially below it, move
-   cold files from the fuller SSD to the less-full SSD.
-2. Once every SSD is within the configured tolerance of the watermark, move
-   excess SSD files to eligible HDD branches.
+1. If one SSD is above the watermark and another is materially below it, move cold files from the fuller SSD to the less-full SSD.
+2. Once every SSD is within the configured tolerance of the watermark, move excess SSD files to eligible HDD branches.
 
-The production defaults are:
+Production defaults:
 
 | Setting | Default |
 | --- | --- |
 | SSD watermark | `80%` |
 | Watermark tolerance | `2%` |
 | HDD destination policy | `eplfs` |
-| Verification | Size and source stability |
+| Verification | size + source stability |
 | Lock file | `/run/lock/nas-mover.lock` |
 
-`eplfs` means “existing path, least free space.” The destination must have the
-same parent directory and enough free space after honoring `minfreespace`.
+`eplfs` means existing path, least free space. The destination must have the same parent directory and enough free space after honoring mergerfs `minfreespace` and the configured extra reserve.
 
-### Live move safety
+Planning updates simulated branch capacity after every planned move. Parallel execution must preserve that already-decided plan rather than making fresh destination decisions at runtime.
 
-For each planned file, live mode:
+## Runtime discovery
 
-1. Refuses a missing source or existing destination.
-2. Copies to a hidden temporary file in the destination directory.
-3. Confirms the source size and modification time did not change.
-4. Verifies destination size, or SHA-256 when the integration harness requests
-   it.
-5. Atomically renames the temporary file into place.
-6. Flushes destination directory metadata on POSIX systems.
-7. Deletes the source only after all previous steps succeed.
+Production discovery is based on the mounted mergerfs pool, not `/etc/fstab`.
 
-Normal `nas-mover` execution is dry-run by default. `--live` is required to
-change files.
+The mover:
 
-## Configure Your NAS
+- validates the selected mount is `fuse.mergerfs`;
+- reads active branches from `user.mergerfs.branches` on the `.mergerfs` control file;
+- reads active `minfreespace` from mergerfs runtime metadata;
+- uses `findmnt` and `lsblk` to classify active branches as SSD (`ROTA=0`) or HDD (`ROTA=1`);
+- fails closed if required runtime topology/reserve information cannot be established.
 
-Production discovery is runtime-based. The selected mergerfs pool must already
-be mounted. `nas-mover` validates that the target is a `fuse.mergerfs` mount,
-then reads the current branch list from `user.mergerfs.branches` on the pool's
-`.mergerfs` control file. This matters because branch membership may change at
-runtime and `/etc/fstab` can be stale or intentionally contain no mergerfs
-entry.
-
-The mover also reads the active `minfreespace` reserve from mergerfs runtime
-metadata. Some FUSE mounts do not expose mergerfs-specific options through
-`findmnt`, so `user.mergerfs.minfreespace` is the authoritative fallback. If
-no runtime reserve can be determined, runtime discovery fails closed rather
-than silently assuming zero reserve.
-
-For the production NAS, configure the pool explicitly:
-
-```toml
-mount_override = "/mnt/nas/data"
-```
-
-Inspect the active pool before installing or troubleshooting the mover:
-
-```bash
-findmnt -n -o FSTYPE,OPTIONS --target /mnt/nas/data
-sudo getfattr -d -m 'user\.mergerfs\..*' -- /mnt/nas/data/.mergerfs
-```
-
-The following is an example branch layout, not a required layout:
+Typical production pool:
 
 ```text
 /mnt/nas/ssd1-data/data
@@ -99,239 +108,110 @@ The following is an example branch layout, not a required layout:
 /mnt/nas/hdd6-data/data
 ```
 
-Parity filesystems should not be mergerfs data branches. The program checks
-that the selected pool and every active branch are mounted. It does not mount,
-unlock, or repair filesystems.
+Parity filesystems are not mergerfs data branches. `nas-mover` never mounts, unlocks, repairs, spins down, or powers storage devices.
 
-`--fstab` is retained as an explicit compatibility/testing path. It is not the
-production discovery source.
+`--fstab` remains a compatibility/testing path only.
 
-## Install On The NAS
+## Transactional move safety
 
-Install the release branch or tag you have reviewed in an isolated virtual
-environment:
+For every file, live mode currently performs:
 
-```bash
-sudo apt update
-sudo apt install -y git python3 python3-venv python3-pip attr
-
-sudo mkdir -p /opt/nas-mover
-sudo chown "$USER:$USER" /opt/nas-mover
-git clone https://github.com/jigleski/nas-mover.git /opt/nas-mover
-
-cd /opt/nas-mover
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e '.[test]'
+```text
+validate source + destination
+-> copy to .nas-mover.<name>.<pid>.partial
+-> verify source did not change
+-> verify destination size (or SHA-256 when requested)
+-> atomic rename partial -> final destination
+-> fsync destination directory metadata
+-> delete source
 ```
 
-The `attr` package provides `getfattr`, which runtime mergerfs discovery uses.
+The source is deleted only after the destination is complete and committed.
 
-### Host configuration
+### Cooperative cancellation requirement
 
-Copy [config.example.toml](config.example.toml) to `/etc/nas-mover/config.toml`
-and edit the host-specific values. The file is TOML, so lines beginning with
-`#` are comments. Paths, percentages, policy, age filtering, reserve space,
-and verification mode are documented there. The loader rejects unknown keys
-and invalid enum values.
+The current copy/cleanup path catches ordinary Python exceptions, but process signals require explicit cooperative handling before bounded routine execution or outage preemption can rely on it.
 
-```bash
-sudo install -d -m 0755 /etc/nas-mover
-sudo cp config.example.toml /etc/nas-mover/config.toml
-sudoedit /etc/nas-mover/config.toml
+Target SIGTERM/SIGINT behavior:
+
+```text
+signal
+-> global cancellation requested
+-> workers stop taking new moves
+-> each active copy aborts cooperatively
+-> active .partial file is removed
+-> source for the interrupted file remains intact
+-> previously completed files remain committed
+-> all workers finish cancellation
+-> process lock releases
+-> process exits with an outcome distinguishable from ordinary ERROR
 ```
 
-Run it explicitly. Normal execution remains dry-run:
+With several destination workers active, the parent process must wait until **all** workers have stopped before returning. A scheduling wrapper must never assume that killing only the coordinator means disk I/O has ceased.
+
+## Dry-run and live operation
+
+Dry-run is the default:
 
 ```bash
 sudo /opt/nas-mover/.venv/bin/nas-mover \
   --config /etc/nas-mover/config.toml
 ```
 
-For a one-off alternate pool, use `--mount`:
+Apply the plan only with `--live`:
 
 ```bash
 sudo /opt/nas-mover/.venv/bin/nas-mover \
   --config /etc/nas-mover/config.toml \
-  --mount /path/to/other/mergerfs/pool
-```
-
-CLI flags such as `--fstab`, `--mount`, `--scope`, and `--lock` override the
-file for a single run. Keep test-only overrides out of the production config.
-
-For later updates:
-
-```bash
-cd /opt/nas-mover
-source .venv/bin/activate
-git pull --ff-only origin main
-python -m pip install -e .
-```
-
-## Required End-User Validation
-
-Before relying on the mover, validate it against a dedicated test directory in
-your own mergerfs data branches. Do not use a directory containing production
-files. Keep the repository's automated tests separate from this live test:
-
-```bash
-cd /opt/nas-mover
-source .venv/bin/activate
-python -m pytest
-```
-
-The suite uses real temporary files for transfer behavior and mocks Linux
-commands in unit tests. The commands below exercise the actual mounted pool,
-branch devices, permissions, and mergerfs runtime layout.
-
-Choose a relative scope that is unused on every data branch, for example
-`mover-test/source`. Create that directory on each active data branch. Then run
-the one-command validation:
-
-```bash
-sudo /opt/nas-mover/.venv/bin/nas-mover-test-suite \
-  --config /etc/nas-mover/config.toml \
-  --scope mover-test/source \
   --live
 ```
 
-This command:
+`--scope` restricts planning to a relative directory and is primarily useful for controlled integration testing. Absolute paths and `..` traversal are rejected.
 
-- Runs the full pytest suite.
-- Discovers the active mergerfs pool, branches, mounts, and SSD/HDD types.
-- Creates six named fixture files only in the scoped test directory on the
-  first SSD branch.
-- Plans only files under that relative scope.
-- Prints the six planned moves.
-- With `--live`, copies, verifies, hashes, and deletes the fixtures.
-- Cleans the named fixture files from every branch even if verification fails.
+## Configuration
 
-The harness refuses to overwrite existing `test-*.bin` fixtures. Do not use a
-scope containing production files. The `--live` flag is intentionally required.
-The harness uses a zero watermark only for these six controlled fixtures; that
-does not change the production default of `80%`.
+Host-specific mover policy is loaded from `/etc/nas-mover/config.toml`. In the homelab deployment this runtime file may be rendered/installed by `nas-config`; it is not the authority for the routine maintenance clock or mover deadline.
 
-To run the same setup and scoped dry run without moving files, omit `--live`:
+The routine maintenance start time, mover-duration window, settle interval, and SnapRAID scrub policy live in `nas-config/config/nas-system.toml`, not this project.
 
-```bash
-sudo /opt/nas-mover/.venv/bin/nas-mover-test-suite \
-  --config /etc/nas-mover/config.toml \
-  --scope mover-test/source
-```
+## Testing requirements
 
-### Review the result
+Repository tests must continue to cover the transactional move path and planner behavior. Before destination concurrency is considered production-ready, add automated/integration coverage for:
 
-Confirm that the live command reports successful copy, SHA-256 verification,
-source deletion, and cleanup. Independently inspect each branch and confirm
-that only the six generated `test-*.bin` files were involved. If any path is
-unexpected, stop and investigate before using the mover on production data.
+1. multiple planned moves to one HDD remain serialized;
+2. moves to two or more distinct HDD destinations overlap in execution;
+3. planner-selected destination paths are preserved exactly;
+4. destination reserve/capacity planning remains valid;
+5. failure of one worker stops new work and produces a deterministic overall result;
+6. SIGTERM/SIGINT with one worker active removes its partial and retains its source;
+7. SIGTERM/SIGINT with multiple destination workers waits for every worker to quiesce;
+8. already completed moves remain committed after cancellation;
+9. process lock releases only after workers are done.
 
-## Normal Operation
+Live validation should use a dedicated scoped test directory containing generated fixtures only.
 
-Always start with a dry run and review every proposed path:
-
-```bash
-sudo /opt/nas-mover/.venv/bin/nas-mover \
-  --config /etc/nas-mover/config.toml
-```
-
-The `--scope` option is for controlled testing and is relative to every
-mergerfs branch; absolute paths and `..` traversal are rejected.
-
-Do not use `--watermark 0 --tolerance 0` for normal operation. Those overrides
-exist only to force a controlled test plan with tiny fixture files.
-
-This project does not currently install a systemd service or timer. Scheduling
-should be added only after the production dry-run output, logging, alerting,
-and SnapRAID sequencing have been designed and reviewed.
-
-## Development And Coverage
-
-The source uses a `src/` layout:
+## Development map
 
 ```text
-src/nas_mover/models.py       domain data structures
-src/nas_mover/policy.py       destination policies
-src/nas_mover/planner.py      scanning and move planning
-src/nas_mover/transfer.py     copy, verify, replace, delete
-src/nas_mover/discovery.py    runtime mergerfs and device discovery
-src/nas_mover/locking.py      POSIX process lock
-src/nas_mover/config.py       validated defaults and parsing
-src/nas_mover/cli.py          dry-run/live mover command
+src/nas_mover/models.py       domain structures
+src/nas_mover/policy.py       destination policy
+src/nas_mover/planner.py      scanning and planning
+src/nas_mover/transfer.py     transactional file transfer
+src/nas_mover/discovery.py    live mergerfs/device discovery
+src/nas_mover/locking.py      process lock
+src/nas_mover/config.py       mover-specific config
+src/nas_mover/cli.py          command orchestration
 src/nas_mover/test_suite.py   NAS integration harness
 ```
 
-Run the suite with branch coverage:
+Run tests with:
 
 ```bash
 python -m pytest
 ```
 
-The measured mover logic currently has a 100% statement and branch coverage
-gate. The command-entry wrappers are excluded from coverage because they only
-delegate into tested functions.
+The project maintains a 100% meaningful statement/branch coverage gate for measured mover logic.
 
-## Command Help
+## Architecture principle
 
-The installed commands provide the following help text.
-
-### `nas-mover --help`
-
-```text
-usage: nas-mover [-h] [--live] [--config CONFIG] [--fstab FSTAB]
-                 [--mount MOUNT] [--lock LOCK] [--scope SCOPE]
-                 [--watermark WATERMARK] [--tolerance TOLERANCE]
-
-Balance mergerfs SSD storage and spill excess to HDD.
-
-options:
-  -h, --help            show this help message and exit
-  --live                Apply the plan; dry-run is the default.
-  --config CONFIG       Path to an editable TOML configuration file.
-  --fstab FSTAB         Use fstab compatibility/testing discovery instead of
-                        runtime mergerfs discovery.
-  --mount MOUNT         Override the configured mergerfs mountpoint.
-  --lock LOCK           Override the configured lock path for testing or
-                        staging.
-  --scope SCOPE         Restrict planning to a relative branch directory.
-  --watermark WATERMARK
-                        Override the SSD watermark percentage for testing.
-  --tolerance TOLERANCE
-                        Override the SSD watermark tolerance for testing.
-```
-
-### `nas-mover-test-fixtures --help`
-
-```text
-usage: nas-mover-test-fixtures [-h] [--count COUNT] [--cleanup] sandbox
-
-Create or remove NAS mover test fixtures in a dedicated sandbox.
-
-positional arguments:
-  sandbox        Dedicated sandbox directory; production mounts are refused.
-
-options:
-  -h, --help     show this help message and exit
-  --count COUNT  Number of test files to create.
-  --cleanup      Remove only the named test files.
-```
-
-### `nas-mover-test-suite --help`
-
-```text
-usage: nas-mover-test-suite [-h] [--config CONFIG] [--fstab FSTAB]
-                            [--mount MOUNT] --scope SCOPE [--lock LOCK]
-                            [--live]
-
-Run pytest and a scoped NAS mover integration test.
-
-options:
-  -h, --help       show this help message and exit
-  --config CONFIG  Path to an editable TOML configuration file.
-  --fstab FSTAB    Use fstab compatibility/testing discovery.
-  --mount MOUNT
-  --scope SCOPE    Relative test directory on every branch.
-  --lock LOCK
-  --live           Apply the scoped integration plan.
-```
+Keep this project narrow. `nas-mover` should become better at safely and efficiently executing its already-planned file moves, but it should not grow into a NAS maintenance daemon. Scheduling, power/outage decisions, SnapRAID sequencing, and storage lifecycle belong outside it.

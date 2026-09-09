@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import threading
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 
 from .models import PlannedMove
 from .transfer import MoveCancelled, Verification, execute_move
+
+MoveExecutor = Callable[..., None]
 
 
 def _run_serial_queue(
@@ -14,11 +16,12 @@ def _run_serial_queue(
     *,
     verify: Verification,
     cancel_event: threading.Event,
+    move_executor: MoveExecutor,
 ) -> None:
     for move in moves:
         if cancel_event.is_set():
             raise MoveCancelled("Mover cancellation requested")
-        execute_move(move, verify=verify, cancel_requested=cancel_event.is_set)
+        move_executor(move, verify=verify, cancel_requested=cancel_event.is_set)
 
 
 def execute_moves(
@@ -26,6 +29,7 @@ def execute_moves(
     *,
     verify: Verification = "size",
     cancel_event: threading.Event | None = None,
+    move_executor: MoveExecutor = execute_move,
 ) -> None:
     """Execute one authoritative plan with serial queues per HDD destination.
 
@@ -49,28 +53,31 @@ def execute_moves(
     for move in sequential:
         if cancel.is_set():
             raise MoveCancelled("Mover cancellation requested")
-        execute_move(move, verify=verify, cancel_requested=cancel.is_set)
+        move_executor(move, verify=verify, cancel_requested=cancel.is_set)
 
     if not hdd_queues:
         return
 
     futures: list[Future[None]] = []
-    first_error: BaseException | None = None
+    errors: list[BaseException] = []
     with ThreadPoolExecutor(max_workers=len(hdd_queues), thread_name_prefix="nas-mover") as pool:
         for queue in hdd_queues.values():
             futures.append(
-                pool.submit(_run_serial_queue, queue, verify=verify, cancel_event=cancel)
+                pool.submit(
+                    _run_serial_queue,
+                    queue,
+                    verify=verify,
+                    cancel_event=cancel,
+                    move_executor=move_executor,
+                )
             )
         for future in as_completed(futures):
             try:
                 future.result()
             except BaseException as exc:
-                if first_error is None:
-                    first_error = exc
+                errors.append(exc)
                 cancel.set()
         # ThreadPoolExecutor context exit joins every worker.
 
-    if first_error is not None:
-        raise first_error
-    if cancel.is_set():
-        raise MoveCancelled("Mover cancellation requested")
+    if errors:
+        raise errors[0]

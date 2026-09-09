@@ -39,6 +39,12 @@ def _copy_file(
     temp: Path,
     cancel_requested: Callable[[], bool] | None,
 ) -> None:
+    # Preserve the simple direct-call path for callers/tests that do not need
+    # cancellation. Live plan execution always supplies a cancellation callback.
+    if cancel_requested is None:
+        shutil.copy2(source, temp)
+        return
+
     with source.open("rb") as src, temp.open("xb") as dst:
         while True:
             _check_cancel(cancel_requested)

@@ -13,7 +13,7 @@ from .executor import execute_moves
 from .locking import process_lock
 from .models import PoolConfig
 from .planner import plan_moves
-from .transfer import MoveCancelled
+from .transfer import MoveCancelled, execute_move
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -92,6 +92,7 @@ def run(argv: Sequence[str] | None = None) -> int:
                     moves,
                     verify=config.verification,  # type: ignore[arg-type]
                     cancel_event=cancel_event,
+                    move_executor=execute_move,
                 )
             finally:
                 _restore_signal_handlers(previous)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from collections import defaultdict
 from collections.abc import Iterable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 
 from .models import PlannedMove
 from .transfer import MoveCancelled, Verification, execute_move
@@ -61,7 +61,7 @@ def execute_moves(
             futures.append(
                 pool.submit(_run_serial_queue, queue, verify=verify, cancel_event=cancel)
             )
-        for future in futures:
+        for future in as_completed(futures):
             try:
                 future.result()
             except BaseException as exc:

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import signal
+import threading
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
 from .config import MoverConfig
 from .discovery import discover_branches, discover_runtime_pool, parse_fstab
+from .executor import execute_moves
 from .locking import process_lock
 from .models import PoolConfig
 from .planner import plan_moves
-from .transfer import execute_move
+from .transfer import MoveCancelled, execute_move
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,6 +27,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--watermark", type=float, default=None, help="Override the SSD watermark percentage for testing.")
     parser.add_argument("--tolerance", type=float, default=None, help="Override the SSD watermark tolerance for testing.")
     return parser
+
+
+def _install_cancel_handlers(cancel_event: threading.Event) -> dict[int, signal.Handlers]:
+    previous: dict[int, signal.Handlers] = {}
+
+    def request_cancel(_signum: int, _frame: object) -> None:
+        cancel_event.set()
+
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        previous[signum] = signal.getsignal(signum)
+        signal.signal(signum, request_cancel)
+    return previous
+
+
+def _restore_signal_handlers(previous: dict[int, signal.Handlers]) -> None:
+    for signum, handler in previous.items():
+        signal.signal(signum, handler)
 
 
 def run(argv: Sequence[str] | None = None) -> int:
@@ -65,14 +85,26 @@ def run(argv: Sequence[str] | None = None) -> int:
         for move in moves:
             print(f"{move.reason}: {move.source_path} -> {move.destination_path}")
         if args.live:
-            for move in moves:
-                execute_move(move, verify=config.verification)  # type: ignore[arg-type]
+            cancel_event = threading.Event()
+            previous = _install_cancel_handlers(cancel_event)
+            try:
+                execute_moves(
+                    moves,
+                    verify=config.verification,  # type: ignore[arg-type]
+                    cancel_event=cancel_event,
+                    move_executor=execute_move,
+                )
+            finally:
+                _restore_signal_handlers(previous)
     return 0
 
 
 def main() -> int:
     try:
         return run()
+    except MoveCancelled as exc:
+        print(f"CANCELLED: {exc}")
+        return 130
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}")
         return 1

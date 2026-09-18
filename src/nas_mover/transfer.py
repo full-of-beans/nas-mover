@@ -62,7 +62,7 @@ def execute_move(
     *,
     verify: Verification = "size",
     cancel_requested: Callable[[], bool] | None = None,
-) -> None:
+) -> int:
     source, destination = move.source_path, move.destination_path
     _check_cancel(cancel_requested)
     if not source.is_file():
@@ -93,6 +93,7 @@ def execute_move(
             finally:
                 os.close(directory_fd)
         source.unlink()
+        return copied.st_size
     except Exception:
         try:
             temp.unlink()

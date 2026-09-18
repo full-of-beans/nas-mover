@@ -1,0 +1,297 @@
+{
+  "dry_run": {
+    "schema_version": 1,
+    "mode": "dry_run",
+    "status": "planned",
+    "started_at": "2026-09-18T12:00:00+00:00",
+    "finished_at": "2026-09-18T12:00:10+00:00",
+    "duration_seconds": 10.0,
+    "planned": {
+      "files": 2,
+      "bytes": 100,
+      "routes": [
+        {
+          "source": "/mnt/nas/ssd1-data/data",
+          "destination": "/mnt/nas/hdd1-data/data",
+          "files": 2,
+          "bytes": 100
+        }
+      ]
+    },
+    "completed": {
+      "files": 0,
+      "bytes": 0,
+      "routes": []
+    },
+    "dispositions": {
+      "completed": {
+        "files": 0,
+        "bytes": 0,
+        "routes": []
+      },
+      "not_started": {
+        "files": 2,
+        "bytes": 100,
+        "routes": [
+          {
+            "source": "/mnt/nas/ssd1-data/data",
+            "destination": "/mnt/nas/hdd1-data/data",
+            "files": 2,
+            "bytes": 100
+          }
+        ]
+      },
+      "active": {
+        "files": 0,
+        "bytes": 0,
+        "routes": []
+      },
+      "interrupted": {
+        "files": 0,
+        "bytes": 0,
+        "routes": []
+      },
+      "failed": {
+        "files": 0,
+        "bytes": 0,
+        "routes": []
+      }
+    },
+    "file_progress_percent": 0.0,
+    "byte_progress_percent": 0.0,
+    "progress_percent": 0.0,
+    "eta_seconds": null,
+    "error": null
+  },
+  "running_event": {
+    "schema_version": 1,
+    "event": "progress",
+    "result": {
+      "schema_version": 1,
+      "mode": "live",
+      "status": "running",
+      "started_at": "2026-09-18T12:00:00+00:00",
+      "finished_at": null,
+      "duration_seconds": 5.0,
+      "planned": {
+        "files": 2,
+        "bytes": 100,
+        "routes": [
+          {
+            "source": "/mnt/nas/ssd1-data/data",
+            "destination": "/mnt/nas/hdd1-data/data",
+            "files": 2,
+            "bytes": 100
+          }
+        ]
+      },
+      "completed": {
+        "files": 1,
+        "bytes": 60,
+        "routes": [
+          {
+            "source": "/mnt/nas/ssd1-data/data",
+            "destination": "/mnt/nas/hdd1-data/data",
+            "files": 1,
+            "bytes": 60
+          }
+        ]
+      },
+      "dispositions": {
+        "completed": {
+          "files": 1,
+          "bytes": 60,
+          "routes": [
+            {
+              "source": "/mnt/nas/ssd1-data/data",
+              "destination": "/mnt/nas/hdd1-data/data",
+              "files": 1,
+              "bytes": 60
+            }
+          ]
+        },
+        "not_started": {
+          "files": 1,
+          "bytes": 40,
+          "routes": [
+            {
+              "source": "/mnt/nas/ssd1-data/data",
+              "destination": "/mnt/nas/hdd1-data/data",
+              "files": 1,
+              "bytes": 40
+            }
+          ]
+        },
+        "active": {
+          "files": 0,
+          "bytes": 0,
+          "routes": []
+        },
+        "interrupted": {
+          "files": 0,
+          "bytes": 0,
+          "routes": []
+        },
+        "failed": {
+          "files": 0,
+          "bytes": 0,
+          "routes": []
+        }
+      },
+      "file_progress_percent": 50.0,
+      "byte_progress_percent": 60.0,
+      "progress_percent": 60.0,
+      "eta_seconds": null,
+      "error": null
+    }
+  },
+  "cooperative_terminal": {
+    "schema_version": 1,
+    "mode": "live",
+    "status": "cancelled",
+    "started_at": "2026-09-18T12:00:00+00:00",
+    "finished_at": "2026-09-18T12:00:10+00:00",
+    "duration_seconds": 10.0,
+    "planned": {
+      "files": 2,
+      "bytes": 100,
+      "routes": [
+        {
+          "source": "/mnt/nas/ssd1-data/data",
+          "destination": "/mnt/nas/hdd1-data/data",
+          "files": 2,
+          "bytes": 100
+        }
+      ]
+    },
+    "completed": {
+      "files": 1,
+      "bytes": 60,
+      "routes": [
+        {
+          "source": "/mnt/nas/ssd1-data/data",
+          "destination": "/mnt/nas/hdd1-data/data",
+          "files": 1,
+          "bytes": 60
+        }
+      ]
+    },
+    "dispositions": {
+      "completed": {
+        "files": 1,
+        "bytes": 60,
+        "routes": [
+          {
+            "source": "/mnt/nas/ssd1-data/data",
+            "destination": "/mnt/nas/hdd1-data/data",
+            "files": 1,
+            "bytes": 60
+          }
+        ]
+      },
+      "not_started": {
+        "files": 1,
+        "bytes": 40,
+        "routes": [
+          {
+            "source": "/mnt/nas/ssd1-data/data",
+            "destination": "/mnt/nas/hdd1-data/data",
+            "files": 1,
+            "bytes": 40
+          }
+        ]
+      },
+      "active": {
+        "files": 0,
+        "bytes": 0,
+        "routes": []
+      },
+      "interrupted": {
+        "files": 0,
+        "bytes": 0,
+        "routes": []
+      },
+      "failed": {
+        "files": 0,
+        "bytes": 0,
+        "routes": []
+      }
+    },
+    "file_progress_percent": 50.0,
+    "byte_progress_percent": 60.0,
+    "progress_percent": 60.0,
+    "eta_seconds": null,
+    "error": "Mover cancellation requested"
+  },
+  "successful_terminal": {
+    "schema_version": 1,
+    "mode": "live",
+    "status": "completed",
+    "started_at": "2026-09-18T12:00:00+00:00",
+    "finished_at": "2026-09-18T12:00:10+00:00",
+    "duration_seconds": 10.0,
+    "planned": {
+      "files": 2,
+      "bytes": 100,
+      "routes": [
+        {
+          "source": "/mnt/nas/ssd1-data/data",
+          "destination": "/mnt/nas/hdd1-data/data",
+          "files": 2,
+          "bytes": 100
+        }
+      ]
+    },
+    "completed": {
+      "files": 2,
+      "bytes": 100,
+      "routes": [
+        {
+          "source": "/mnt/nas/ssd1-data/data",
+          "destination": "/mnt/nas/hdd1-data/data",
+          "files": 2,
+          "bytes": 100
+        }
+      ]
+    },
+    "dispositions": {
+      "completed": {
+        "files": 2,
+        "bytes": 100,
+        "routes": [
+          {
+            "source": "/mnt/nas/ssd1-data/data",
+            "destination": "/mnt/nas/hdd1-data/data",
+            "files": 2,
+            "bytes": 100
+          }
+        ]
+      },
+      "not_started": {
+        "files": 0,
+        "bytes": 0,
+        "routes": []
+      },
+      "active": {
+        "files": 0,
+        "bytes": 0,
+        "routes": []
+      },
+      "interrupted": {
+        "files": 0,
+        "bytes": 0,
+        "routes": []
+      },
+      "failed": {
+        "files": 0,
+        "bytes": 0,
+        "routes": []
+      }
+    },
+    "file_progress_percent": 100.0,
+    "byte_progress_percent": 100.0,
+    "progress_percent": 100.0,
+    "eta_seconds": null,
+    "error": null
+  }
+}

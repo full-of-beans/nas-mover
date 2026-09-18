@@ -8,7 +8,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from .models import PlannedMove
 from .transfer import MoveCancelled, Verification, execute_move
 
-MoveExecutor = Callable[..., None]
+MoveExecutor = Callable[..., int | None]
 
 
 def _run_serial_queue(
@@ -80,4 +80,4 @@ def execute_moves(
         # ThreadPoolExecutor context exit joins every worker.
 
     if errors:
-        raise errors[0]
+        raise min(errors, key=lambda error: isinstance(error, MoveCancelled))

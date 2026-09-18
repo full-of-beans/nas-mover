@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import json
+import sys
 import signal
 import threading
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
+from .reporting import ExecutionReport, render
 from .config import MoverConfig
 from .discovery import discover_branches, discover_runtime_pool, parse_fstab
 from .executor import execute_moves
@@ -26,6 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scope", type=str, default=None, help="Restrict planning to a relative branch directory.")
     parser.add_argument("--watermark", type=float, default=None, help="Override the SSD watermark percentage for testing.")
     parser.add_argument("--tolerance", type=float, default=None, help="Override the SSD watermark tolerance for testing.")
+    output = parser.add_mutually_exclusive_group()
+    output.add_argument("--json", action="store_true", help="One terminal JSON result on stdout.")
+    output.add_argument("--json-events", action="store_true", help="Ephemeral JSON Lines planned/progress/result events.")
     return parser
 
 
@@ -48,6 +54,20 @@ def _restore_signal_handlers(previous: dict[int, signal.Handlers]) -> None:
 
 def run(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    report = ExecutionReport(live=args.live, emit=(lambda event: print(json.dumps(event), flush=True)) if args.json_events else None)
+    try:
+        return _run(args, report)
+    except (OSError, RuntimeError, ValueError) as exc:
+        if not (args.json or args.json_events):
+            raise
+        result = report.finish("cancelled" if isinstance(exc, MoveCancelled) else "failed", str(exc))
+        if args.json:
+            print(json.dumps(result))
+        print(str(exc), file=sys.stderr)
+        return 130 if isinstance(exc, MoveCancelled) else 1
+
+
+def _run(args: argparse.Namespace, report: ExecutionReport) -> int:
     config = MoverConfig.from_file(Path(args.config)) if args.config else MoverConfig()
     config = replace(
         config,
@@ -81,9 +101,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             extra_free_percent=config.extra_free_percent,
             scope=scope,
         )
-        print(f"{'LIVE' if args.live else 'DRY RUN'}: {len(moves)} move(s) planned")
-        for move in moves:
-            print(f"{move.reason}: {move.source_path} -> {move.destination_path}")
+        report.plan(moves)
         if args.live:
             cancel_event = threading.Event()
             previous = _install_cancel_handlers(cancel_event)
@@ -92,10 +110,19 @@ def run(argv: Sequence[str] | None = None) -> int:
                     moves,
                     verify=config.verification,  # type: ignore[arg-type]
                     cancel_event=cancel_event,
-                    move_executor=execute_move,
+                    move_executor=report.wrap(execute_move),
                 )
+            except (OSError, RuntimeError, ValueError) as exc:
+                if not (args.json or args.json_events):
+                    print(render(report.finish("cancelled" if isinstance(exc, MoveCancelled) else "failed", str(exc))))
+                raise
             finally:
                 _restore_signal_handlers(previous)
+    result = report.finish("completed" if args.live else "planned")
+    if args.json:
+        print(json.dumps(result))
+    elif not args.json_events:
+        print(render(result))
     return 0
 
 

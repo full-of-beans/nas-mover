@@ -1,0 +1,4 @@
+LIVE: COMPLETED
+SOURCE -> DESTINATION | PLANNED files / bytes | COMPLETED files / bytes
+/mnt/nas/ssd1-data/data -> /mnt/nas/hdd1-data/data | 2 / 100 | 2 / 100
+TOTAL: planned 2 files / 100 bytes; completed 2 files / 100 bytes

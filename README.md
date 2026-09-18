@@ -30,39 +30,12 @@ Moves to the same destination HDD remain serialized.
 
 `nas-config` may run the mover for a bounded routine window or invoke it manually for a longer/full drain. `nas-mover` itself should remain useful independently of that scheduler.
 
-## Current versus target execution
+## Current execution
 
-The current CLI executes planned moves sequentially:
-
-```text
-move 1 -> complete
-move 2 -> complete
-move 3 -> complete
-...
-```
-
-The accepted target is destination-aware concurrency for SSD-to-HDD moves:
-
-```text
-planner output
-    |
-    +--> hdd1 queue --> one worker
-    +--> hdd3 queue --> one worker
-    +--> hdd4 queue --> one worker
-    +--> hdd6 queue --> one worker
-```
-
-Rules for the target implementation:
-
-- the planner chooses each destination before execution;
-- execution must not re-run placement policy independently in workers;
-- at most one active transfer targets a given HDD;
-- workers for different destination HDDs may run in parallel;
-- the natural concurrency ceiling is the number of distinct destination HDDs in the plan, currently at most four;
-- SSD-to-SSD balancing may remain serialized initially;
-- cancellation stops workers from accepting new work and waits for all active workers to converge before process exit.
-
-This design uses independent HDD write bandwidth without creating simultaneous write/seek contention on one destination disk.
+The executor serializes SSD-destination moves, then runs one serial queue per
+HDD destination concurrently. Planner-selected paths remain authoritative.
+Cancellation and failure stop new work and join all workers before releasing
+the process lock.
 
 ## Planning behavior
 
@@ -114,7 +87,7 @@ Parity filesystems are not mergerfs data branches. `nas-mover` never mounts, unl
 
 ## Transactional move safety
 
-For every file, live mode currently performs:
+For every file, live mode performs:
 
 ```text
 validate source + destination
@@ -128,26 +101,21 @@ validate source + destination
 
 The source is deleted only after the destination is complete and committed.
 
-### Cooperative cancellation requirement
+### Cooperative cancellation
 
-The current copy/cleanup path catches ordinary Python exceptions, but process signals require explicit cooperative handling before bounded routine execution or outage preemption can rely on it.
+SIGTERM/SIGINT request cancellation. Active copies check cancellation between
+chunks, clean their partial files, and preserve their sources. Previously
+completed moves remain committed. All workers quiesce before the process lock
+releases and exit 130 is returned.
 
-Target SIGTERM/SIGINT behavior:
+## Structured execution reporting
 
-```text
-signal
--> global cancellation requested
--> workers stop taking new moves
--> each active copy aborts cooperatively
--> active .partial file is removed
--> source for the interrupted file remains intact
--> previously completed files remain committed
--> all workers finish cancellation
--> process lock releases
--> process exits with an outcome distinguishable from ordinary ERROR
-```
-
-With several destination workers active, the parent process must wait until **all** workers have stopped before returning. A scheduling wrapper must never assume that killing only the coordinator means disk I/O has ceased.
+Use `--json` for one terminal result, or `--json-events` for ephemeral JSON Lines
+planned/progress/result events. Both use schema version 1. Default human output
+summarizes planned and completed file/byte counts by branch route.
+See [the execution contract](docs/reporting.md) for the exact schema, accounting,
+progress, error/exit semantics, crash limitations and maintenance integration.
+Progress lives in memory; the caller owns durable terminal-result retention.
 
 ## Dry-run and live operation
 
@@ -176,7 +144,7 @@ The routine maintenance start time, mover-duration window, settle interval, and 
 
 ## Testing requirements
 
-Repository tests must continue to cover the transactional move path and planner behavior. Before destination concurrency is considered production-ready, add automated/integration coverage for:
+Repository tests must continue to cover the transactional move path and planner behavior. Destination concurrency coverage includes:
 
 1. multiple planned moves to one HDD remain serialized;
 2. moves to two or more distinct HDD destinations overlap in execution;

@@ -56,4 +56,4 @@ def test_contract_version_is_available_without_runtime_discovery(capsys):
     with pytest.raises(SystemExit) as result:
         build_parser().parse_args(["--contract-version"])
     assert result.value.code == 0
-    assert capsys.readouterr().out.strip() == "nas-mover-phase9-v1"
+    assert capsys.readouterr().out.strip() == "nas-mover-contract-v1"

@@ -23,6 +23,7 @@ from functools import partial
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Balance mergerfs SSD storage and spill excess to HDD.")
+    parser.add_argument("--contract-version", action="version", version="nas-mover-phase9-v1")
     parser.add_argument("--live", action="store_true", help="Apply the plan; dry-run is the default.")
     parser.add_argument("--config", type=str, default=None, help="Path to an editable TOML configuration file.")
     parser.add_argument("--fstab", type=str, default=None, help="Use a mergerfs entry from this fstab instead of runtime discovery (testing/staging).")

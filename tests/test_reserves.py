@@ -6,6 +6,7 @@ import pytest
 from nas_mover.discovery import Pool, discover_branches, discover_runtime_pool, parse_branch, parse_fstab
 from nas_mover.models import Branch, PoolConfig
 from nas_mover.planner import plan_moves
+from nas_mover.cli import build_parser
 
 
 @pytest.mark.parametrize("text", ["/ssd=RW,garbage", "/ssd=RO,150G", "ssd=RW,150G", "/ssd=RW,1G,2G", "/ssd"])
@@ -49,3 +50,10 @@ def test_ssd_destination_respects_its_branch_reserve(tmp_path):
     landing.min_free_bytes = 20
     assert len(plan_moves([full, landing], [], PoolConfig(), watermark_percent=80,
                           tolerance_percent=2, policy="ff")) == 1
+
+
+def test_contract_version_is_available_without_runtime_discovery(capsys):
+    with pytest.raises(SystemExit) as result:
+        build_parser().parse_args(["--contract-version"])
+    assert result.value.code == 0
+    assert capsys.readouterr().out.strip() == "nas-mover-phase9-v1"

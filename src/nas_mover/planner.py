@@ -28,7 +28,7 @@ def scan_files(branch: Branch, scope: Path = Path("."), excluded_paths: tuple[Pa
                 stat = path.stat()
             except OSError:
                 continue
-            if path.is_file():
+            if path.is_file() and not path.is_symlink():
                 candidates.append(CandidateFile(
                     branch, path, path.relative_to(branch.path), stat.st_size,
                     stat.st_atime, stat.st_mtime,

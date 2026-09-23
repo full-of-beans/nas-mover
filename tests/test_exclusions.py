@@ -37,6 +37,8 @@ def test_recursive_paths_and_boundaries(tmp_path):
     assert missing["excluded_paths"][0]["present"] is False
     assert missing["excluded_paths"][0]["allocated_bytes"] is None
     assert scan_files(ssd, Path("data/.pbs/a"), exclusions) == []
+    (ssd.path / "data" / "alias").symlink_to(ssd.path / "data/.pbs/a/chunk")
+    assert Path("data/alias") not in {item.relative_path for item in scan_files(ssd, excluded_paths=exclusions)}
 
 
 def test_failed_accounting_preserves_last_good(tmp_path, monkeypatch):
@@ -83,6 +85,22 @@ def test_exclusion_appears_during_copy(tmp_path, monkeypatch):
         execute_move(move, exclusions_provider=lambda: (Path("file"),) if changed else ())
     assert path.exists()
     assert not (dst.path / "file").exists()
+
+
+def test_stale_plan_symlink_rename_rejected(tmp_path):
+    src, dst = branch(tmp_path / "src"), branch(tmp_path / "dst")
+    (src.path / "folder").mkdir()
+    (src.path / "folder" / "file").write_text("ordinary")
+    protected = tmp_path / "protected"
+    protected.mkdir()
+    (protected / "file").write_text("secret")
+    move = PlannedMove(src, dst, Path("folder/file"), 8, 0, 0, "test")
+    (src.path / "folder").rename(src.path / "old_folder")
+    (src.path / "folder").symlink_to(protected, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="symlink"):
+        execute_move(move)
+    assert (protected / "file").read_text() == "secret"
+    assert not (dst.path / "folder").exists()
 
 
 def test_cli_accounting_and_config_contract(tmp_path, monkeypatch, capsys):

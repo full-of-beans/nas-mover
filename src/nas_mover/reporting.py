@@ -38,6 +38,7 @@ class ExecutionReport:
         self.status = "planning"
         self.error: str | None = None
         self.moves: list[PlannedMove] | None = None
+        self.accounting: dict | None = None
         self.states: dict[int, str] = {}
         self.actual: dict[int, int] = {}
         self.lock = threading.Lock()
@@ -65,7 +66,8 @@ class ExecutionReport:
                     duration_seconds=self.duration if self.duration is not None else time.monotonic() - self.started,
                     planned=planned, completed=completed, dispositions=dispositions,
                     file_progress_percent=files, byte_progress_percent=bytes_percent,
-                    progress_percent=bytes_percent, eta_seconds=None, error=self.error)
+                    progress_percent=bytes_percent, eta_seconds=None, error=self.error,
+                    excluded_accounting=self.accounting)
 
     def event(self, kind: str) -> None:
         if self.emit is not None:

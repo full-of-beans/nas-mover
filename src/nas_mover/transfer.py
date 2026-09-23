@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from .models import PlannedMove
+from .accounting import is_excluded
 
 Verification = Literal["size", "sha256"]
 COPY_CHUNK_BYTES = 8 * 1024 * 1024
@@ -62,9 +63,13 @@ def execute_move(
     *,
     verify: Verification = "size",
     cancel_requested: Callable[[], bool] | None = None,
+    excluded_paths: tuple[Path, ...] = (),
+    exclusions_provider: Callable[[], tuple[Path, ...]] | None = None,
 ) -> int:
     source, destination = move.source_path, move.destination_path
     _check_cancel(cancel_requested)
+    if is_excluded(move.relative_path, exclusions_provider() if exclusions_provider else excluded_paths):
+        raise RuntimeError(f"Path became excluded before transfer: {move.relative_path}")
     if not source.is_file():
         raise RuntimeError(f"Source vanished: {source}")
     if destination.exists():
@@ -85,6 +90,8 @@ def execute_move(
         if verify not in {"size", "sha256"}:
             raise ValueError(f"Unknown verification mode: {verify}")
         _check_cancel(cancel_requested)
+        if is_excluded(move.relative_path, exclusions_provider() if exclusions_provider else excluded_paths):
+            raise RuntimeError(f"Path became excluded during transfer: {move.relative_path}")
         os.replace(temp, destination)
         if hasattr(os, "O_DIRECTORY"):
             directory_fd = os.open(destination.parent, os.O_DIRECTORY)

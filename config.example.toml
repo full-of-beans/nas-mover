@@ -48,3 +48,9 @@ mount_override = "/mnt/nas/data"
 # fstab_path is retained only for the explicit --fstab compatibility/testing path.
 fstab_path = "/etc/fstab"
 lock_path = "/run/lock/nas-mover.lock"
+
+# Branch-relative protected paths. Each root is excluded recursively on every
+# branch; accounting only reads SSD branches. Use a dedicated SSD1 path when
+# consumers need SSD1-only attribution.
+excluded_paths = []
+accounting_path = "/var/lib/nas-mover/excluded-accounting.json"

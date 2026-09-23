@@ -185,6 +185,13 @@ The project maintains a 100% meaningful statement/branch coverage gate for measu
 Keep this project narrow. `nas-mover` should become better at safely and efficiently executing its already-planned file moves, but it should not grow into a NAS maintenance daemon. Scheduling, power/outage decisions, SnapRAID sequencing, and storage lifecycle belong outside it.
 # Protected paths and accounting
 
+The mover also reads mergerfs's native branch-specific reserve suffix, for
+example `/mnt/ssd1/data=RW,150G`. It checks that reserve before selecting an
+SSD rebalance destination or an HDD spill destination. The global
+`minfreespace` remains a floor for every branch. A malformed or unexpected
+runtime branch mode/reserve fails discovery before planning. The `--fstab`
+testing path still accepts legacy unqualified branch names.
+
 `excluded_paths` in the TOML configuration lists branch-relative paths (for
 example `data/.pbs`). Each entry excludes that path and every descendant from
 planning. The live executor rereads the configuration immediately before the

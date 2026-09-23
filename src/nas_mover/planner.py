@@ -79,7 +79,8 @@ def plan_moves(
         if candidate is None:
             break
         used.add((most.path, candidate.relative_path))
-        if least.simulated_free_bytes < candidate.size or (least.path / candidate.relative_path).exists():
+        if (least.simulated_free_bytes - candidate.size < max(config.min_free_bytes, least.min_free_bytes)
+                or (least.path / candidate.relative_path).exists()):
             continue
         move = PlannedMove(most, least, candidate.relative_path, candidate.size, candidate.atime, candidate.mtime, "SSD -> SSD")
         planned.append(move)
@@ -100,7 +101,7 @@ def plan_moves(
                     break
             else:
                 break
-        reserves = [max(config.min_free_bytes, int(h.total_bytes * extra_free_percent / 100)) for h in hdds]
+        reserves = [max(config.min_free_bytes, h.min_free_bytes, int(h.total_bytes * extra_free_percent / 100)) for h in hdds]
         eligible = [h for h, reserve in zip(hdds, reserves) if h.simulated_free_bytes - candidate.size >= reserve]
         destination = choose_destination(policy, eligible, candidate.relative_path, candidate.size, max(reserves, default=0))
         used.add((source.path, candidate.relative_path))

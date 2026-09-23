@@ -12,6 +12,7 @@ class Branch:
     total_bytes: int
     free_bytes: int
     used_bytes: int
+    min_free_bytes: int = 0
     simulated_free_bytes: int = field(init=False)
     simulated_used_bytes: int = field(init=False)
     planned_dirs: set[Path] = field(default_factory=set)

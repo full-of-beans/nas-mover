@@ -114,7 +114,7 @@ def _run(args: argparse.Namespace, report: ExecutionReport) -> int:
             cancel_event = threading.Event()
             previous = _install_cancel_handlers(cancel_event)
             try:
-                execute_moves(
+                execute_moves(  # pragma: no branch - Python 3.13 synthetic call-to-exit edge
                     moves,
                     verify=config.verification,  # type: ignore[arg-type]
                     cancel_event=cancel_event,

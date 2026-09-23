@@ -142,6 +142,16 @@ def test_snapshot_open_failure_leaves_previous(tmp_path, monkeypatch):
     assert destination.read_text() == "previous"
 
 
+def test_unexpected_executor_exception_restores_signal_handlers(tmp_path, monkeypatch):
+    ssd1, ssd2, hdd = (branch(tmp_path / name) for name in ("one", "two", "three"))
+    hdd.rotational = True
+    monkeypatch.setattr("nas_mover.cli.discover_runtime_pool", lambda mount: Pool(mount, [], {}, 0))
+    monkeypatch.setattr("nas_mover.cli.discover_branches", lambda pool: [ssd1, ssd2, hdd])
+    monkeypatch.setattr("nas_mover.cli.execute_moves", lambda *args, **kwargs: (_ for _ in ()).throw(TypeError("unexpected")))
+    with pytest.raises(TypeError, match="unexpected"):
+        run(["--live", "--lock", str(tmp_path / "lock")])
+
+
 @pytest.mark.parametrize("invalid", ["/absolute", "../outside", "."])
 def test_invalid_exclusion(invalid):
     with pytest.raises(ValueError):

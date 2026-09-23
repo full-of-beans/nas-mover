@@ -21,6 +21,8 @@ class MoverConfig:
     # None means select the sole fuse.mergerfs entry from fstab automatically.
     mount_override: Path | None = None
     lock_path: Path = Path("/run/lock/nas-mover.lock")
+    excluded_paths: tuple[Path, ...] = ()
+    accounting_path: Path = Path("/var/lib/nas-mover/excluded-accounting.json")
 
     @classmethod
     def from_file(cls, path: Path) -> "MoverConfig":
@@ -31,7 +33,7 @@ class MoverConfig:
         unknown = set(values) - {
             "watermark_percent", "tolerance_percent", "policy",
             "min_file_age_hours", "extra_free_percent", "verification",
-            "fstab_path", "mount_override", "lock_path",
+            "fstab_path", "mount_override", "lock_path", "excluded_paths", "accounting_path",
         }
         if unknown:
             raise ValueError(f"Unknown configuration option(s): {', '.join(sorted(unknown))}")
@@ -39,6 +41,8 @@ class MoverConfig:
             "fstab_path": Path,
             "mount_override": lambda value: Path(value) if value is not None else None,
             "lock_path": Path,
+            "accounting_path": Path,
+            "excluded_paths": lambda entries: tuple(Path(entry) for entry in entries),
         }
         for key, converter in path_values.items():
             if key in values:
@@ -60,6 +64,9 @@ class MoverConfig:
             raise ValueError("extra_free_percent cannot be negative")
         if self.verification not in {"size", "sha256"}:
             raise ValueError("verification must be 'size' or 'sha256'")
+        for path in self.excluded_paths:
+            if path == Path(".") or path.is_absolute() or ".." in path.parts or not path.parts:
+                raise ValueError(f"Excluded paths must be relative directories/files inside a branch: {path}")
 
 
 def parse_size(value: str) -> int:

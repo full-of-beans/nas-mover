@@ -183,3 +183,35 @@ The project maintains a 100% meaningful statement/branch coverage gate for measu
 ## Architecture principle
 
 Keep this project narrow. `nas-mover` should become better at safely and efficiently executing its already-planned file moves, but it should not grow into a NAS maintenance daemon. Scheduling, power/outage decisions, SnapRAID sequencing, and storage lifecycle belong outside it.
+# Protected paths and accounting
+
+The mover also reads mergerfs's native branch-specific reserve suffix, for
+example `/mnt/ssd1/data=RW,150G`. It checks that reserve before selecting an
+SSD rebalance destination or an HDD spill destination. The global
+`minfreespace` remains a floor for every branch. A malformed or unexpected
+runtime branch mode/reserve fails discovery before planning. The `--fstab`
+testing path still accepts legacy unqualified branch names.
+
+`excluded_paths` in the TOML configuration lists branch-relative paths (for
+example `data/.pbs`). Each entry excludes that path and every descendant from
+planning. The live executor rereads the configuration immediately before the
+transfer and before committing the copied file; an invalid or unreadable
+configuration fails the move closed. Keep the config file root-owned and change
+it atomically. Existing moves that have already committed are not reversed.
+
+When exclusions are configured, the mover scans only SSD branches for their
+allocated bytes (`st_blocks * 512`), apparent regular-file bytes, and file
+counts. Nested entries are counted once. Missing excluded roots are explicitly
+reported with `present=false` and null counters. The v1 `excluded_accounting`
+field appears in the existing JSON/JSON-events result. A complete scan is
+atomically written to `accounting_path` with its `observed_at` timestamp; a
+failed scan leaves the previous snapshot intact. The snapshot is an observation
+at planning time, not a live free-space measurement. Filesystem-wide mover
+watermarks still count excluded data through filesystem usage.
+
+For rollout, install the updated mover before configuring exclusions in the NAS
+caller. Back up the prior config and snapshot, verify the expected relative path
+and branch attribution with `--json`, and then allow live runs. For rollback,
+stop mover invocation at a clean boundary and restore the previous config and
+binary together; retain the last-good accounting file for audit and never
+remove protected data to make a rollback succeed.

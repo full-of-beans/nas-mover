@@ -5,25 +5,30 @@ from pathlib import Path
 
 from .models import Branch, CandidateFile, PlannedMove, PoolConfig
 from .policy import Policy, choose_destination
+from .accounting import is_excluded
 
 
-def scan_files(branch: Branch, scope: Path = Path(".")) -> list[CandidateFile]:
+def scan_files(branch: Branch, scope: Path = Path("."), excluded_paths: tuple[Path, ...] = ()) -> list[CandidateFile]:
     try:
         (branch.path / scope).resolve().relative_to(branch.path.resolve())
     except ValueError as exc:
         raise ValueError(f"Scope must remain inside branch: {scope}") from exc
     candidates: list[CandidateFile] = []
+    if is_excluded(scope, excluded_paths):
+        return candidates
     for root, dirs, files in os.walk(branch.path / scope, topdown=True, followlinks=False):
-        dirs[:] = [name for name in dirs if not name.startswith(".nas-mover.")]
+        relative = Path(root).relative_to(branch.path)
+        dirs[:] = [name for name in dirs if not name.startswith(".nas-mover.")
+                   and not is_excluded(relative / name, excluded_paths)]
         for name in files:
-            if name.startswith(".nas-mover."):
+            if name.startswith(".nas-mover.") or is_excluded(relative / name, excluded_paths):
                 continue
             path = Path(root) / name
             try:
                 stat = path.stat()
             except OSError:
                 continue
-            if path.is_file():
+            if path.is_file() and not path.is_symlink():
                 candidates.append(CandidateFile(
                     branch, path, path.relative_to(branch.path), stat.st_size,
                     stat.st_atime, stat.st_mtime,
@@ -53,10 +58,11 @@ def plan_moves(
     policy: Policy,
     extra_free_percent: float = 0,
     scope: Path = Path("."),
+    excluded_paths: tuple[Path, ...] = (),
 ) -> list[PlannedMove]:
     if not ssds:
         return []
-    candidates = {branch.path: scan_files(branch, scope) for branch in ssds}
+    candidates = {branch.path: scan_files(branch, scope, excluded_paths) for branch in ssds}
     planned: list[PlannedMove] = []
     used: set[tuple[Path, Path]] = set()
     lower = watermark_percent - tolerance_percent
@@ -73,7 +79,8 @@ def plan_moves(
         if candidate is None:
             break
         used.add((most.path, candidate.relative_path))
-        if least.simulated_free_bytes < candidate.size or (least.path / candidate.relative_path).exists():
+        if (least.simulated_free_bytes - candidate.size < max(config.min_free_bytes, least.min_free_bytes)
+                or (least.path / candidate.relative_path).exists()):
             continue
         move = PlannedMove(most, least, candidate.relative_path, candidate.size, candidate.atime, candidate.mtime, "SSD -> SSD")
         planned.append(move)
@@ -94,7 +101,7 @@ def plan_moves(
                     break
             else:
                 break
-        reserves = [max(config.min_free_bytes, int(h.total_bytes * extra_free_percent / 100)) for h in hdds]
+        reserves = [max(config.min_free_bytes, h.min_free_bytes, int(h.total_bytes * extra_free_percent / 100)) for h in hdds]
         eligible = [h for h, reserve in zip(hdds, reserves) if h.simulated_free_bytes - candidate.size >= reserve]
         destination = choose_destination(policy, eligible, candidate.relative_path, candidate.size, max(reserves, default=0))
         used.add((source.path, candidate.relative_path))

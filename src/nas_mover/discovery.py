@@ -4,7 +4,7 @@ import os
 import re
 import shlex
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import parse_size
@@ -17,6 +17,22 @@ class Pool:
     branches: list[Path]
     options: dict[str, str | bool]
     min_free_bytes: int
+    branch_min_free_bytes: dict[Path, int] = field(default_factory=dict)
+
+
+def parse_branch(entry: str) -> tuple[Path, int]:
+    """Parse the native mergerfs RW branch and optional individual reserve."""
+    if "=" not in entry:
+        raise RuntimeError(f"Invalid mergerfs branch entry: {entry!r}")
+    path, mode = entry.rsplit("=", 1)
+    parts = mode.split(",")
+    if not path.startswith("/") or len(parts) not in (1, 2) or parts[0] != "RW":
+        raise RuntimeError(f"Unexpected mergerfs branch entry: {entry!r}")
+    try:
+        reserve = parse_size(parts[1]) if len(parts) == 2 else 0
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid mergerfs branch reserve: {entry!r}") from exc
+    return Path(path), reserve
 
 
 def _parse_options(raw_options: str) -> dict[str, str | bool]:
@@ -47,11 +63,16 @@ def parse_fstab(path: Path, mount_override: Path | None = None) -> Pool:
         raise RuntimeError("More than one matching mergerfs entry exists")
     source, mountpoint, raw_options = entries[0]
     options = _parse_options(raw_options)
+    # Historical fstab fixtures permit unqualified paths; runtime metadata
+    # always requires the explicit RW mode and is validated strictly below.
+    parsed = [parse_branch(entry) if "=" in entry else (Path(entry), 0)
+              for entry in source.split(":")]
     return Pool(
         Path(mountpoint),
-        [Path(branch) for branch in source.split(":")],
+        [branch for branch, _ in parsed],
         options,
         parse_size(str(options["minfreespace"])) if "minfreespace" in options else 0,
+        {branch: reserve for branch, reserve in parsed if reserve},
     )
 
 
@@ -85,13 +106,14 @@ def discover_runtime_pool(
         raise RuntimeError("mergerfs returned an empty runtime branch list")
 
     branches: list[Path] = []
+    branch_reserves: dict[Path, int] = {}
     for entry in raw_branches.split(":"):
         if "=" not in entry:
             raise RuntimeError(f"Invalid mergerfs runtime branch entry: {entry!r}")
-        path, mode = entry.rsplit("=", 1)
-        if mode != "RW" or not path.startswith("/"):
-            raise RuntimeError(f"Unexpected mergerfs runtime branch entry: {entry!r}")
-        branches.append(Path(path))
+        path, reserve = parse_branch(entry)
+        branches.append(path)
+        if reserve:
+            branch_reserves[path] = reserve
     if len(set(branches)) != len(branches):
         raise RuntimeError("mergerfs returned duplicate runtime branches")
 
@@ -118,7 +140,7 @@ def discover_runtime_pool(
             raise RuntimeError(f"Invalid mergerfs runtime minfreespace value: {min_free_raw!r}")
         options["minfreespace"] = min_free_raw
 
-    return Pool(mountpoint, branches, options, min_free_bytes)
+    return Pool(mountpoint, branches, options, min_free_bytes, branch_reserves)
 
 
 def require_mount(path: Path, runner=subprocess.run) -> None:
@@ -166,5 +188,7 @@ def discover_branches(pool: Pool, runner=subprocess.run) -> list[Branch]:
     branches: list[Branch] = []
     for order, path in enumerate(pool.branches):
         require_mount(path, runner)
-        branches.append(stat_branch(path, order, runner))
+        branch = stat_branch(path, order, runner)
+        branch.min_free_bytes = pool.branch_min_free_bytes.get(path, 0)
+        branches.append(branch)
     return branches

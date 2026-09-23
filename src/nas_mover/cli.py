@@ -17,10 +17,13 @@ from .locking import process_lock
 from .models import PoolConfig
 from .planner import plan_moves
 from .transfer import MoveCancelled, execute_move
+from .accounting import publish_snapshot, scan_exclusions
+from functools import partial
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Balance mergerfs SSD storage and spill excess to HDD.")
+    parser.add_argument("--contract-version", action="version", version="nas-mover-phase9-v1")
     parser.add_argument("--live", action="store_true", help="Apply the plan; dry-run is the default.")
     parser.add_argument("--config", type=str, default=None, help="Path to an editable TOML configuration file.")
     parser.add_argument("--fstab", type=str, default=None, help="Use a mergerfs entry from this fstab instead of runtime discovery (testing/staging).")
@@ -93,6 +96,8 @@ def _run(args: argparse.Namespace, report: ExecutionReport) -> int:
             raise RuntimeError(f"Expected at least two SSD branches; found {len(ssds)}")
         if not hdds:
             raise RuntimeError("No HDD branches were discovered")
+        # Complete SSD-only scan first. Errors preserve the previous good snapshot.
+        accounting = scan_exclusions(ssds, config.excluded_paths) if config.excluded_paths else None
         moves = plan_moves(
             ssds, hdds, PoolConfig(pool.min_free_bytes),
             watermark_percent=config.watermark_percent,
@@ -100,17 +105,25 @@ def _run(args: argparse.Namespace, report: ExecutionReport) -> int:
             policy=config.policy,
             extra_free_percent=config.extra_free_percent,
             scope=scope,
+            excluded_paths=config.excluded_paths,
         )
+        if accounting is not None:
+            publish_snapshot(accounting, config.accounting_path)
+            report.accounting = accounting
         report.plan(moves)
         if args.live:
             cancel_event = threading.Event()
             previous = _install_cancel_handlers(cancel_event)
             try:
-                execute_moves(
+                execute_moves(  # pragma: no branch - Python 3.13 synthetic call-to-exit edge
                     moves,
                     verify=config.verification,  # type: ignore[arg-type]
                     cancel_event=cancel_event,
-                    move_executor=report.wrap(execute_move),
+                    move_executor=report.wrap(partial(
+                        execute_move,
+                        exclusions_provider=(lambda: MoverConfig.from_file(Path(args.config)).excluded_paths)
+                        if args.config else (lambda: config.excluded_paths),
+                    )),
                 )
             except (OSError, RuntimeError, ValueError) as exc:
                 if not (args.json or args.json_events):

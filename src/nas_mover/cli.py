@@ -2,43 +2,92 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import signal
+import sys
 import threading
 from collections.abc import Sequence
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
-from .reporting import ExecutionReport, render
+from .accounting import publish_snapshot, scan_exclusions
 from .config import MoverConfig
 from .discovery import discover_branches, discover_runtime_pool, parse_fstab
 from .executor import execute_moves
 from .locking import process_lock
 from .models import PoolConfig
 from .planner import plan_moves
+from .reporting import ExecutionReport, render
 from .transfer import MoveCancelled, execute_move
-from .accounting import publish_snapshot, scan_exclusions
-from functools import partial
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Balance mergerfs SSD storage and spill excess to HDD.")
-    parser.add_argument("--contract-version", action="version", version="nas-mover-contract-v1")
-    parser.add_argument("--live", action="store_true", help="Apply the plan; dry-run is the default.")
-    parser.add_argument("--config", type=str, default=None, help="Path to an editable TOML configuration file.")
-    parser.add_argument("--fstab", type=str, default=None, help="Use a mergerfs entry from this fstab instead of runtime discovery (testing/staging).")
-    parser.add_argument("--mount", type=str, default=None, help="Override the configured mergerfs mountpoint.")
-    parser.add_argument("--lock", type=str, default=None, help="Override the configured lock path for testing or staging.")
-    parser.add_argument("--scope", type=str, default=None, help="Restrict planning to a relative directory.")
-    parser.add_argument("--watermark", type=float, default=None, help="Override the SSD watermark percentage for testing.")
-    parser.add_argument("--tolerance", type=float, default=None, help="Override the SSD watermark tolerance for testing.")
+    parser = argparse.ArgumentParser(
+        description="Balance mergerfs SSD storage and spill excess to HDD."
+    )
+    parser.add_argument(
+        "--contract-version", action="version", version="nas-mover-contract-v1"
+    )
+    parser.add_argument(
+        "--live", action="store_true", help="Apply the plan; dry-run is the default."
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to an editable TOML configuration file.",
+    )
+    parser.add_argument(
+        "--fstab",
+        type=str,
+        default=None,
+        help="Use a mergerfs entry from this fstab instead of runtime discovery (testing/staging).",
+    )
+    parser.add_argument(
+        "--mount",
+        type=str,
+        default=None,
+        help="Override the configured mergerfs mountpoint.",
+    )
+    parser.add_argument(
+        "--lock",
+        type=str,
+        default=None,
+        help="Override the configured lock path for testing or staging.",
+    )
+    parser.add_argument(
+        "--scope",
+        type=str,
+        default=None,
+        help="Restrict planning to a relative directory.",
+    )
+    parser.add_argument(
+        "--watermark",
+        type=float,
+        default=None,
+        help="Override the SSD watermark percentage for testing.",
+    )
+    parser.add_argument(
+        "--tolerance",
+        type=float,
+        default=None,
+        help="Override the SSD watermark tolerance for testing.",
+    )
     output = parser.add_mutually_exclusive_group()
-    output.add_argument("--json", action="store_true", help="One terminal JSON result on stdout.")
-    output.add_argument("--json-events", action="store_true", help="Ephemeral JSON Lines planned/progress/result events.")
+    output.add_argument(
+        "--json", action="store_true", help="One terminal JSON result on stdout."
+    )
+    output.add_argument(
+        "--json-events",
+        action="store_true",
+        help="Ephemeral JSON Lines planned/progress/result events.",
+    )
     return parser
 
 
-def _install_cancel_handlers(cancel_event: threading.Event) -> dict[int, signal.Handlers]:
+def _install_cancel_handlers(
+    cancel_event: threading.Event,
+) -> dict[int, signal.Handlers]:
     previous: dict[int, signal.Handlers] = {}
 
     def request_cancel(_signum: int, _frame: object) -> None:
@@ -57,13 +106,20 @@ def _restore_signal_handlers(previous: dict[int, signal.Handlers]) -> None:
 
 def run(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    report = ExecutionReport(live=args.live, emit=(lambda event: print(json.dumps(event), flush=True)) if args.json_events else None)
+    report = ExecutionReport(
+        live=args.live,
+        emit=(lambda event: print(json.dumps(event), flush=True))
+        if args.json_events
+        else None,
+    )
     try:
         return _run(args, report)
     except (OSError, RuntimeError, ValueError) as exc:
         if not (args.json or args.json_events):
             raise
-        result = report.finish("cancelled" if isinstance(exc, MoveCancelled) else "failed", str(exc))
+        result = report.finish(
+            "cancelled" if isinstance(exc, MoveCancelled) else "failed", str(exc)
+        )
         if args.json:
             print(json.dumps(result))
         print(str(exc), file=sys.stderr)
@@ -77,8 +133,12 @@ def _run(args: argparse.Namespace, report: ExecutionReport) -> int:
         fstab_path=Path(args.fstab) if args.fstab else config.fstab_path,
         mount_override=Path(args.mount) if args.mount else config.mount_override,
         lock_path=Path(args.lock) if args.lock else config.lock_path,
-        watermark_percent=args.watermark if args.watermark is not None else config.watermark_percent,
-        tolerance_percent=args.tolerance if args.tolerance is not None else config.tolerance_percent,
+        watermark_percent=args.watermark
+        if args.watermark is not None
+        else config.watermark_percent,
+        tolerance_percent=args.tolerance
+        if args.tolerance is not None
+        else config.tolerance_percent,
     )
     scope = Path(args.scope) if args.scope else Path(".")
     if scope.is_absolute() or ".." in scope.parts:
@@ -97,9 +157,15 @@ def _run(args: argparse.Namespace, report: ExecutionReport) -> int:
         if not hdds:
             raise RuntimeError("No HDD branches were discovered")
         # Complete SSD-only scan first. Errors preserve the previous good snapshot.
-        accounting = scan_exclusions(ssds, config.excluded_paths) if config.excluded_paths else None
+        accounting = (
+            scan_exclusions(ssds, config.excluded_paths)
+            if config.excluded_paths
+            else None
+        )
         moves = plan_moves(
-            ssds, hdds, PoolConfig(pool.min_free_bytes),
+            ssds,
+            hdds,
+            PoolConfig(pool.min_free_bytes),
             watermark_percent=config.watermark_percent,
             tolerance_percent=config.tolerance_percent,
             policy=config.policy,
@@ -119,15 +185,33 @@ def _run(args: argparse.Namespace, report: ExecutionReport) -> int:
                     moves,
                     verify=config.verification,  # type: ignore[arg-type]
                     cancel_event=cancel_event,
-                    move_executor=report.wrap(partial(
-                        execute_move,
-                        exclusions_provider=(lambda: MoverConfig.from_file(Path(args.config)).excluded_paths)
-                        if args.config else (lambda: config.excluded_paths),
-                    )),
+                    move_executor=report.wrap(
+                        partial(
+                            execute_move,
+                            exclusions_provider=(
+                                lambda: (
+                                    MoverConfig.from_file(
+                                        Path(args.config)
+                                    ).excluded_paths
+                                )
+                            )
+                            if args.config
+                            else (lambda: config.excluded_paths),
+                        )
+                    ),
                 )
             except (OSError, RuntimeError, ValueError) as exc:
                 if not (args.json or args.json_events):
-                    print(render(report.finish("cancelled" if isinstance(exc, MoveCancelled) else "failed", str(exc))))
+                    print(
+                        render(
+                            report.finish(
+                                "cancelled"
+                                if isinstance(exc, MoveCancelled)
+                                else "failed",
+                                str(exc),
+                            )
+                        )
+                    )
                 raise
             finally:
                 _restore_signal_handlers(previous)

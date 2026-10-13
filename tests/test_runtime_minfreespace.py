@@ -6,7 +6,9 @@ import pytest
 from nas_mover.discovery import Pool, discover_runtime_pool
 
 
-def test_runtime_pool_reads_minfreespace_xattr_when_findmnt_omits_it(tmp_path: Path) -> None:
+def test_runtime_pool_reads_minfreespace_xattr_when_findmnt_omits_it(
+    tmp_path: Path,
+) -> None:
     mount = tmp_path / "pool"
     calls: list[list[str]] = []
 
@@ -28,14 +30,21 @@ def test_runtime_pool_reads_minfreespace_xattr_when_findmnt_omits_it(tmp_path: P
     assert pool == Pool(
         mount,
         [Path("/ssd1"), Path("/ssd2"), Path("/hdd")],
-        {"rw": True, "relatime": True, "allow_other": True, "minfreespace": "21474836480"},
+        {
+            "rw": True,
+            "relatime": True,
+            "allow_other": True,
+            "minfreespace": "21474836480",
+        },
         20 * 1024**3,
     )
     assert any("user.mergerfs.minfreespace" in command for command in calls)
 
 
 @pytest.mark.parametrize("value", ["", "bogus", "-1"])
-def test_runtime_pool_rejects_invalid_minfreespace_xattr(tmp_path: Path, value: str) -> None:
+def test_runtime_pool_rejects_invalid_minfreespace_xattr(
+    tmp_path: Path, value: str
+) -> None:
     mount = tmp_path / "pool"
 
     def runner(command, **kwargs):

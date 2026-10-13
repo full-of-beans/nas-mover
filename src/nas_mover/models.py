@@ -33,7 +33,8 @@ class Branch:
     def simulated_used_percent(self) -> float:
         return (
             self.simulated_used_bytes / self.total_bytes * 100
-            if self.total_bytes else 0
+            if self.total_bytes
+            else 0
         )
 
 

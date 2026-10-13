@@ -29,12 +29,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run pytest and a scoped NAS mover integration test."
     )
-    parser.add_argument("--config", type=Path, default=None, help="Path to an editable TOML configuration file.")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Path to an editable TOML configuration file.",
+    )
     parser.add_argument("--fstab", type=Path, default=None)
     parser.add_argument("--mount", type=Path, default=None)
-    parser.add_argument("--scope", type=Path, required=True, help="Relative test directory on every branch.")
+    parser.add_argument(
+        "--scope",
+        type=Path,
+        required=True,
+        help="Relative test directory on every branch.",
+    )
     parser.add_argument("--lock", type=Path, default=None)
-    parser.add_argument("--live", action="store_true", help="Apply the scoped integration plan.")
+    parser.add_argument(
+        "--live", action="store_true", help="Apply the scoped integration plan."
+    )
     return parser
 
 
@@ -68,7 +80,9 @@ def run(argv: Sequence[str] | None = None) -> int:
         ssds = [branch for branch in branches if not branch.rotational]
         hdds = [branch for branch in branches if branch.rotational]
         if len(ssds) < 2 or not hdds:
-            raise RuntimeError("Integration requires at least two SSD branches and one HDD branch")
+            raise RuntimeError(
+                "Integration requires at least two SSD branches and one HDD branch"
+            )
         for branch in branches:
             branch_scope = Sandbox(branch.path / args.scope)
             branch_scope.root.mkdir(parents=True, exist_ok=True)
@@ -77,7 +91,9 @@ def run(argv: Sequence[str] | None = None) -> int:
         if any(fixture_scope.path(relative).exists() for relative in relative_fixtures):
             raise RuntimeError("Refusing to overwrite existing integration fixtures")
         for index, relative in enumerate(relative_fixtures, start=1):
-            fixture_scope.create_fixture(relative, f"nas-mover test fixture {index}\n".encode())
+            fixture_scope.create_fixture(
+                relative, f"nas-mover test fixture {index}\n".encode()
+            )
         try:
             moves = plan_moves(
                 ssds,
@@ -90,8 +106,12 @@ def run(argv: Sequence[str] | None = None) -> int:
                 scope=args.scope,
             )
             if len(moves) != len(relative_fixtures):
-                raise RuntimeError(f"Expected {len(relative_fixtures)} scoped moves, planned {len(moves)}")
-            print(f"{'LIVE' if args.live else 'DRY RUN'}: {len(moves)} scoped move(s) planned")
+                raise RuntimeError(
+                    f"Expected {len(relative_fixtures)} scoped moves, planned {len(moves)}"
+                )
+            print(
+                f"{'LIVE' if args.live else 'DRY RUN'}: {len(moves)} scoped move(s) planned"
+            )
             for move in moves:
                 print(f"{move.reason}: {move.source_path} -> {move.destination_path}")
             if not args.live:
@@ -100,10 +120,14 @@ def run(argv: Sequence[str] | None = None) -> int:
                 execute_move(move, verify="sha256")
             for move in moves:
                 if move.source_path.exists() or not move.destination_path.is_file():
-                    raise RuntimeError(f"Integration verification failed: {move.relative_path}")
+                    raise RuntimeError(
+                        f"Integration verification failed: {move.relative_path}"
+                    )
                 expected = f"nas-mover test fixture {move.relative_path.stem.removeprefix('test-')}\n".encode()
                 if _hash(move.destination_path) != hashlib.sha256(expected).hexdigest():
-                    raise RuntimeError(f"Integration hash verification failed: {move.relative_path}")
+                    raise RuntimeError(
+                        f"Integration hash verification failed: {move.relative_path}"
+                    )
             print("LIVE INTEGRATION: copy, verify, delete, and hash checks passed")
             return 0
         finally:

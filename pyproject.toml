@@ -41,3 +41,13 @@ omit = [
 [tool.coverage.report]
 fail_under = 100
 show_missing = true
+
+[tool.ruff]
+required-version = "==0.16.10"
+line-length = 88
+target-version = "py311"
+# Python policy: preserve Markdown prose and historical code snippets.
+include = ["*.py", "*.pyi", "*.pyw", "*.ipynb", "**/pyproject.toml"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

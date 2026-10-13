@@ -60,7 +60,9 @@ def execute_moves(
 
     futures: list[Future[None]] = []
     errors: list[BaseException] = []
-    with ThreadPoolExecutor(max_workers=len(hdd_queues), thread_name_prefix="nas-mover") as pool:
+    with ThreadPoolExecutor(
+        max_workers=len(hdd_queues), thread_name_prefix="nas-mover"
+    ) as pool:
         for queue in hdd_queues.values():
             futures.append(
                 pool.submit(

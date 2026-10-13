@@ -27,19 +27,15 @@ import argparse
 import datetime as dt
 import fcntl
 import hashlib
-import math
 import os
 import random
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
-
 
 # ============================================================================
 # USER CONFIGURATION
@@ -237,8 +233,10 @@ def human_bytes(value: int) -> str:
 
 
 def format_time(timestamp: float) -> str:
-    return dt.datetime.fromtimestamp(timestamp).astimezone().strftime(
-        "%Y-%m-%d %H:%M:%S %Z"
+    return (
+        dt.datetime.fromtimestamp(timestamp)
+        .astimezone()
+        .strftime("%Y-%m-%d %H:%M:%S %Z")
     )
 
 
@@ -309,11 +307,7 @@ def parse_fstab() -> PoolConfig:
         entries.append((source, mountpoint, options))
 
     if MERGERFS_MOUNT_OVERRIDE is not None:
-        entries = [
-            entry
-            for entry in entries
-            if entry[1] == MERGERFS_MOUNT_OVERRIDE
-        ]
+        entries = [entry for entry in entries if entry[1] == MERGERFS_MOUNT_OVERRIDE]
 
     if not entries:
         fail("No matching fuse.mergerfs entry found in /etc/fstab.")
@@ -441,10 +435,7 @@ def discover_branches(config: PoolConfig) -> list[Branch]:
 def scan_files(branch: Branch) -> list[CandidateFile]:
     candidates = []
 
-    cutoff = (
-        dt.datetime.now().timestamp()
-        - MIN_FILE_AGE_HOURS * 3600.0
-    )
+    cutoff = dt.datetime.now().timestamp() - MIN_FILE_AGE_HOURS * 3600.0
 
     for root, dirs, files in os.walk(
         branch.path,
@@ -454,10 +445,7 @@ def scan_files(branch: Branch) -> list[CandidateFile]:
         root_path = Path(root)
 
         # Never traverse our own temporary files/directories.
-        dirs[:] = [
-            d for d in dirs
-            if not d.startswith(".nas-mover.")
-        ]
+        dirs[:] = [d for d in dirs if not d.startswith(".nas-mover.")]
 
         for filename in files:
             if filename.startswith(".nas-mover."):
@@ -636,9 +624,7 @@ def choose_destination(
         max_depth = max(depth_map.values())
 
         candidates = [
-            branch
-            for branch in candidates
-            if depth_map[branch.path] == max_depth
+            branch for branch in candidates if depth_map[branch.path] == max_depth
         ]
 
     # ------------------------------------------------------------------
@@ -792,10 +778,7 @@ def plan_moves(
     moves: list[PlannedMove] = []
     already_planned: set[tuple[Path, Path]] = set()
 
-    candidates_by_branch = {
-        ssd.path: scan_files(ssd)
-        for ssd in ssds
-    }
+    candidates_by_branch = {ssd.path: scan_files(ssd) for ssd in ssds}
 
     # ==================================================================
     # PHASE 1: SSD -> SSD
@@ -819,10 +802,7 @@ def plan_moves(
     #
     # ==================================================================
 
-    lower_watermark = (
-        SSD_WATERMARK_PERCENT
-        - SSD_WATERMARK_TOLERANCE_PERCENT
-    )
+    lower_watermark = SSD_WATERMARK_PERCENT - SSD_WATERMARK_TOLERANCE_PERCENT
 
     while True:
         ordered = sorted(
@@ -834,18 +814,12 @@ def plan_moves(
         most_full = ordered[-1]
 
         # Nothing needs moving if no SSD exceeds the watermark.
-        if (
-            most_full.simulated_used_percent
-            <= SSD_WATERMARK_PERCENT
-        ):
+        if most_full.simulated_used_percent <= SSD_WATERMARK_PERCENT:
             break
 
         # If the least-full SSD is already effectively at the
         # watermark, preserve the excess for Phase 2 (SSD -> HDD).
-        if (
-            least_full.simulated_used_percent
-            >= lower_watermark
-        ):
+        if least_full.simulated_used_percent >= lower_watermark:
             break
 
         candidate = select_next_file(
@@ -860,18 +834,14 @@ def plan_moves(
         destination = least_full
 
         if destination.simulated_free_bytes < candidate.size:
-            already_planned.add(
-                (most_full.path, candidate.relative_path)
-            )
+            already_planned.add((most_full.path, candidate.relative_path))
             continue
 
         if real_destination_exists(
             destination,
             candidate.relative_path,
         ):
-            already_planned.add(
-                (most_full.path, candidate.relative_path)
-            )
+            already_planned.add((most_full.path, candidate.relative_path))
             continue
 
         if planned_destination_exists(
@@ -879,9 +849,7 @@ def plan_moves(
             destination,
             candidate.relative_path,
         ):
-            already_planned.add(
-                (most_full.path, candidate.relative_path)
-            )
+            already_planned.add((most_full.path, candidate.relative_path))
             continue
 
         move = PlannedMove(
@@ -896,9 +864,7 @@ def plan_moves(
 
         moves.append(move)
 
-        already_planned.add(
-            (most_full.path, candidate.relative_path)
-        )
+        already_planned.add((most_full.path, candidate.relative_path))
 
         apply_simulated_move(move)
 
@@ -918,13 +884,9 @@ def plan_moves(
     # ==================================================================
 
     while True:
-
         # Do not spill to HDD while any SSD still has materially
         # under-utilized capacity.
-        if any(
-            ssd.simulated_used_percent < lower_watermark
-            for ssd in ssds
-        ):
+        if any(ssd.simulated_used_percent < lower_watermark for ssd in ssds):
             break
 
         ordered = sorted(
@@ -936,10 +898,7 @@ def plan_moves(
         source = ordered[0]
 
         # Nothing exceeds the actual watermark anymore.
-        if (
-            source.simulated_used_percent
-            <= SSD_WATERMARK_PERCENT
-        ):
+        if source.simulated_used_percent <= SSD_WATERMARK_PERCENT:
             break
 
         candidate = select_next_file(
@@ -953,10 +912,7 @@ def plan_moves(
             found = False
 
             for alternate in ordered[1:]:
-                if (
-                    alternate.simulated_used_percent
-                    <= SSD_WATERMARK_PERCENT
-                ):
+                if alternate.simulated_used_percent <= SSD_WATERMARK_PERCENT:
                     continue
 
                 possible = select_next_file(
@@ -980,20 +936,14 @@ def plan_moves(
         eligible_hdds = []
 
         for hdd in hdds:
-            percentage_reserve = int(
-                hdd.total_bytes
-                * (HDD_EXTRA_FREE_PERCENT / 100.0)
-            )
+            percentage_reserve = int(hdd.total_bytes * (HDD_EXTRA_FREE_PERCENT / 100.0))
 
             reserve = max(
                 config.min_free_bytes,
                 percentage_reserve,
             )
 
-            if (
-                hdd.simulated_free_bytes - candidate.size
-                >= reserve
-            ):
+            if hdd.simulated_free_bytes - candidate.size >= reserve:
                 eligible_hdds.append(hdd)
 
         if not eligible_hdds:
@@ -1004,10 +954,7 @@ def plan_moves(
         reserve = max(
             max(
                 config.min_free_bytes,
-                int(
-                    hdd.total_bytes
-                    * (HDD_EXTRA_FREE_PERCENT / 100.0)
-                ),
+                int(hdd.total_bytes * (HDD_EXTRA_FREE_PERCENT / 100.0)),
             )
             for hdd in eligible_hdds
         )
@@ -1024,18 +971,14 @@ def plan_moves(
             # For an existing-path policy such as eplfs, this can happen
             # when none of the HDD branches currently contains the
             # candidate file's parent path.
-            already_planned.add(
-                (source.path, candidate.relative_path)
-            )
+            already_planned.add((source.path, candidate.relative_path))
             continue
 
         if real_destination_exists(
             destination,
             candidate.relative_path,
         ):
-            already_planned.add(
-                (source.path, candidate.relative_path)
-            )
+            already_planned.add((source.path, candidate.relative_path))
             continue
 
         if planned_destination_exists(
@@ -1043,9 +986,7 @@ def plan_moves(
             destination,
             candidate.relative_path,
         ):
-            already_planned.add(
-                (source.path, candidate.relative_path)
-            )
+            already_planned.add((source.path, candidate.relative_path))
             continue
 
         move = PlannedMove(
@@ -1060,13 +1001,12 @@ def plan_moves(
 
         moves.append(move)
 
-        already_planned.add(
-            (source.path, candidate.relative_path)
-        )
+        already_planned.add((source.path, candidate.relative_path))
 
         apply_simulated_move(move)
 
     return moves
+
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -1092,9 +1032,7 @@ def execute_move(move: PlannedMove) -> None:
         raise RuntimeError(f"Source vanished: {source}")
 
     if destination.exists():
-        raise RuntimeError(
-            f"Destination already exists: {destination}"
-        )
+        raise RuntimeError(f"Destination already exists: {destination}")
 
     destination_parent.mkdir(
         parents=True,
@@ -1103,10 +1041,7 @@ def execute_move(move: PlannedMove) -> None:
 
     before = source.stat()
 
-    temp_name = (
-        f".nas-mover.{destination.name}."
-        f"{os.getpid()}.partial"
-    )
+    temp_name = f".nas-mover.{destination.name}.{os.getpid()}.partial"
 
     temp_path = destination_parent / temp_name
 
@@ -1128,32 +1063,21 @@ def execute_move(move: PlannedMove) -> None:
         copied = temp_path.stat()
 
         # Ensure source was not modified while being copied.
-        if (
-            before.st_size != after.st_size
-            or before.st_mtime_ns != after.st_mtime_ns
-        ):
-            raise RuntimeError(
-                f"Source changed during copy: {source}"
-            )
+        if before.st_size != after.st_size or before.st_mtime_ns != after.st_mtime_ns:
+            raise RuntimeError(f"Source changed during copy: {source}")
 
         if copied.st_size != after.st_size:
-            raise RuntimeError(
-                f"Destination size verification failed: {source}"
-            )
+            raise RuntimeError(f"Destination size verification failed: {source}")
 
         if VERIFY_MODE == "sha256":
             source_hash = sha256(source)
             destination_hash = sha256(temp_path)
 
             if source_hash != destination_hash:
-                raise RuntimeError(
-                    f"SHA-256 verification failed: {source}"
-                )
+                raise RuntimeError(f"SHA-256 verification failed: {source}")
 
         elif VERIFY_MODE != "size":
-            raise RuntimeError(
-                f"Unknown VERIFY_MODE: {VERIFY_MODE}"
-            )
+            raise RuntimeError(f"Unknown VERIFY_MODE: {VERIFY_MODE}")
 
         # Atomic within destination filesystem.
         os.replace(temp_path, destination)
@@ -1301,16 +1225,10 @@ def main() -> int:
         fail("SSD_WATERMARK_PERCENT must be between 0 and 100.")
 
     if not 0 <= SSD_WATERMARK_TOLERANCE_PERCENT <= 100:
-        fail(
-            "SSD_WATERMARK_TOLERANCE_PERCENT "
-            "must be between 0 and 100."
-        )
+        fail("SSD_WATERMARK_TOLERANCE_PERCENT must be between 0 and 100.")
 
     if MOVER_SEARCH_POLICY not in SUPPORTED_POLICIES:
-        fail(
-            f"MOVER_SEARCH_POLICY={MOVER_SEARCH_POLICY!r} "
-            f"is not supported."
-        )
+        fail(f"MOVER_SEARCH_POLICY={MOVER_SEARCH_POLICY!r} is not supported.")
 
     if VERIFY_MODE not in {"size", "sha256"}:
         fail("VERIFY_MODE must be 'size' or 'sha256'.")
@@ -1324,60 +1242,26 @@ def main() -> int:
 
     branches = discover_branches(config)
 
-    ssds = [
-        branch
-        for branch in branches
-        if not branch.rotational
-    ]
+    ssds = [branch for branch in branches if not branch.rotational]
 
-    hdds = [
-        branch
-        for branch in branches
-        if branch.rotational
-    ]
+    hdds = [branch for branch in branches if branch.rotational]
 
     if len(ssds) < 2:
-        fail(
-            f"Expected at least two SSD mergerfs branches; "
-            f"found {len(ssds)}."
-        )
+        fail(f"Expected at least two SSD mergerfs branches; found {len(ssds)}.")
 
     if not hdds:
         fail("No HDD mergerfs branches were discovered.")
 
     print("NAS Mover")
     print("=========")
-    print(
-        f"Mode:                    "
-        f"{'DRY RUN' if args.dry_run else 'LIVE'}"
-    )
-    print(
-        f"MergerFS pool:           {config.mountpoint}"
-    )
-    print(
-        f"SSD watermark:           "
-        f"{SSD_WATERMARK_PERCENT:.2f}%"
-    )
-    print(
-        f"SSD watermark tolerance:   "
-        f"{SSD_WATERMARK_TOLERANCE_PERCENT:.2f}%"
-    )
-    print(
-        f"HDD destination policy:  "
-        f"{MOVER_SEARCH_POLICY}"
-    )
-    print(
-        f"MergerFS minfreespace:   "
-        f"{human_bytes(config.min_free_bytes)}"
-    )
-    print(
-        f"Minimum file age:        "
-        f"{MIN_FILE_AGE_HOURS:.2f} hours"
-    )
-    print(
-        f"Verification:            "
-        f"{VERIFY_MODE}"
-    )
+    print(f"Mode:                    {'DRY RUN' if args.dry_run else 'LIVE'}")
+    print(f"MergerFS pool:           {config.mountpoint}")
+    print(f"SSD watermark:           {SSD_WATERMARK_PERCENT:.2f}%")
+    print(f"SSD watermark tolerance:   {SSD_WATERMARK_TOLERANCE_PERCENT:.2f}%")
+    print(f"HDD destination policy:  {MOVER_SEARCH_POLICY}")
+    print(f"MergerFS minfreespace:   {human_bytes(config.min_free_bytes)}")
+    print(f"Minimum file age:        {MIN_FILE_AGE_HOURS:.2f} hours")
+    print(f"Verification:            {VERIFY_MODE}")
 
     print_branch_status(ssds, hdds)
 

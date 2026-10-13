@@ -1,0 +1,2 @@
+# Developer/CI tooling only; never installed by production deployment.
+ruff==0.16.10

@@ -215,3 +215,26 @@ and branch attribution with `--json`, and then allow live runs. For rollback,
 stop mover invocation at a clean boundary and restore the previous config and
 binary together; retain the last-good accounting file for audit and never
 remove protected data to make a rollback succeed.
+
+## Python formatting and linting
+
+Ruff is the canonical Python formatter and linter: one pinned developer tool
+provides consistent formatting, error checks and import ordering across the
+homelab repositories. It is not a production dependency. Install the tooling in
+a virtual environment with `python -m pip install -r requirements-dev.txt`.
+
+```sh
+ruff format .          # Format locally (88-column target)
+ruff format --check .  # Check without changing files
+ruff check .           # Lint: E4, E7, E9, F and I
+ruff check --fix .     # Apply safe lint fixes; review the diff
+```
+
+Run formatting after lint fixes. Do not use `--unsafe-fixes` without individual
+behavior review. `pyproject.toml` requires Ruff 0.16.10 and targets Python 3.11 (the
+package minimum). Default formatter options
+apply; generated/ignored files follow Ruff's standard discovery exclusions.
+Markdown prose and historical fenced snippets are excluded from this Python policy.
+CI's Python lint and format job runs both checks. The existing Required checks
+job also gates on its result, alongside all existing tests and validation.
+Update the tooling pin and `required-version` together when upgrading Ruff.

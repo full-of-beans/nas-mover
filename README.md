@@ -234,6 +234,7 @@ Run formatting after lint fixes. Do not use `--unsafe-fixes` without individual
 behavior review. `pyproject.toml` requires Ruff 0.16.10 and targets Python 3.11 (the
 package minimum). Default formatter options
 apply; generated/ignored files follow Ruff's standard discovery exclusions.
+Markdown prose and historical fenced snippets are excluded from this Python policy.
 CI's Python lint and format job runs both checks. The existing Required checks
 job also gates on its result, alongside all existing tests and validation.
 Update the tooling pin and `required-version` together when upgrading Ruff.

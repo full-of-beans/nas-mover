@@ -7,8 +7,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-from .models import PlannedMove
 from .accounting import is_excluded
+from .models import PlannedMove
 
 Verification = Literal["size", "sha256"]
 COPY_CHUNK_BYTES = 8 * 1024 * 1024
@@ -77,8 +77,13 @@ def execute_move(
 ) -> int:
     source, destination = move.source_path, move.destination_path
     _check_cancel(cancel_requested)
-    if is_excluded(move.relative_path, exclusions_provider() if exclusions_provider else excluded_paths):
-        raise RuntimeError(f"Path became excluded before transfer: {move.relative_path}")
+    if is_excluded(
+        move.relative_path,
+        exclusions_provider() if exclusions_provider else excluded_paths,
+    ):
+        raise RuntimeError(
+            f"Path became excluded before transfer: {move.relative_path}"
+        )
     _check_source_path(move)
     if not source.is_file():
         raise RuntimeError(f"Source vanished: {source}")
@@ -95,14 +100,21 @@ def execute_move(
             raise RuntimeError(f"Source changed during copy: {source}")
         if copied.st_size != after.st_size:
             raise RuntimeError(f"Destination size verification failed: {source}")
-        if verify == "sha256" and _sha256(source, cancel_requested) != _sha256(temp, cancel_requested):
+        if verify == "sha256" and _sha256(source, cancel_requested) != _sha256(
+            temp, cancel_requested
+        ):
             raise RuntimeError(f"SHA-256 verification failed: {source}")
         if verify not in {"size", "sha256"}:
             raise ValueError(f"Unknown verification mode: {verify}")
         _check_cancel(cancel_requested)
         _check_source_path(move)
-        if is_excluded(move.relative_path, exclusions_provider() if exclusions_provider else excluded_paths):
-            raise RuntimeError(f"Path became excluded during transfer: {move.relative_path}")
+        if is_excluded(
+            move.relative_path,
+            exclusions_provider() if exclusions_provider else excluded_paths,
+        ):
+            raise RuntimeError(
+                f"Path became excluded during transfer: {move.relative_path}"
+            )
         os.replace(temp, destination)
         if hasattr(os, "O_DIRECTORY"):
             directory_fd = os.open(destination.parent, os.O_DIRECTORY)

@@ -15,8 +15,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: Python lint and format
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install pinned developer tooling
+        run: python -m pip install -r requirements-dev.txt
+      - name: Check Python formatting
+        run: ruff format --check .
+      - name: Check Python lint
+        run: ruff check .
+
   required:
     name: Required checks
+    needs: lint
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     container:
@@ -104,16 +124,18 @@ jobs:
         if: always()
         shell: bash
         env:
+          RUFF_OUTCOME: ${{ needs.lint.result }}
           PYTHON_OUTCOME: ${{ steps.python.outcome }}
           TOML_OUTCOME: ${{ steps.toml.outcome }}
           SHELLCHECK_OUTCOME: ${{ steps.shellcheck.outcome }}
         run: |
+          printf 'Ruff: %s\n' "$RUFF_OUTCOME"
           printf 'Python/coverage: %s\n' "$PYTHON_OUTCOME"
           printf 'TOML validation: %s\n' "$TOML_OUTCOME"
           printf 'ShellCheck: %s\n' "$SHELLCHECK_OUTCOME"
 
           failed=0
-          for outcome in "$PYTHON_OUTCOME" "$TOML_OUTCOME" "$SHELLCHECK_OUTCOME"; do
+          for outcome in "$RUFF_OUTCOME" "$PYTHON_OUTCOME" "$TOML_OUTCOME" "$SHELLCHECK_OUTCOME"; do
             [[ "$outcome" == "success" ]] || failed=1
           done
           exit "$failed"

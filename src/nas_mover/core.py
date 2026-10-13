@@ -2,7 +2,7 @@
 
 from .models import Branch, CandidateFile, PlannedMove, PoolConfig
 from .planner import plan_moves, scan_files
-from .policy import Policy, SUPPORTED_POLICIES, choose_destination
+from .policy import SUPPORTED_POLICIES, Policy, choose_destination
 from .transfer import execute_move
 
 __all__ = [

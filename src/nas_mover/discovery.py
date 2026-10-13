@@ -65,8 +65,10 @@ def parse_fstab(path: Path, mount_override: Path | None = None) -> Pool:
     options = _parse_options(raw_options)
     # Historical fstab fixtures permit unqualified paths; runtime metadata
     # always requires the explicit RW mode and is validated strictly below.
-    parsed = [parse_branch(entry) if "=" in entry else (Path(entry), 0)
-              for entry in source.split(":")]
+    parsed = [
+        parse_branch(entry) if "=" in entry else (Path(entry), 0)
+        for entry in source.split(":")
+    ]
     return Pool(
         Path(mountpoint),
         [branch for branch, _ in parsed],
@@ -91,15 +93,21 @@ def discover_runtime_pool(
     require_mount(mountpoint, runner)
     fstype = runner(
         ["findmnt", "-n", "-o", "FSTYPE", "--target", str(mountpoint)],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     if fstype != "fuse.mergerfs":
-        raise RuntimeError(f"Required mount is not mergerfs: {mountpoint} ({fstype or 'unknown'})")
+        raise RuntimeError(
+            f"Required mount is not mergerfs: {mountpoint} ({fstype or 'unknown'})"
+        )
 
     control_file = mountpoint / ".mergerfs"
     result = runner(
         ["getfattr", "--only-values", "-n", runtime_attribute, "--", str(control_file)],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     raw_branches = result.stdout.strip()
     if not raw_branches:
@@ -119,7 +127,9 @@ def discover_runtime_pool(
 
     raw_options = runner(
         ["findmnt", "-n", "-o", "OPTIONS", "--target", str(mountpoint)],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     options = _parse_options(raw_options)
 
@@ -127,17 +137,30 @@ def discover_runtime_pool(
         min_free_bytes = parse_size(str(options["minfreespace"]))
     else:
         min_free_raw = runner(
-            ["getfattr", "--only-values", "-n", "user.mergerfs.minfreespace", "--", str(control_file)],
-            check=True, capture_output=True, text=True,
+            [
+                "getfattr",
+                "--only-values",
+                "-n",
+                "user.mergerfs.minfreespace",
+                "--",
+                str(control_file),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
         if not min_free_raw:
             raise RuntimeError("mergerfs returned an empty runtime minfreespace value")
         try:
             min_free_bytes = int(min_free_raw)
         except ValueError as exc:
-            raise RuntimeError(f"Invalid mergerfs runtime minfreespace value: {min_free_raw!r}") from exc
+            raise RuntimeError(
+                f"Invalid mergerfs runtime minfreespace value: {min_free_raw!r}"
+            ) from exc
         if min_free_bytes < 0:
-            raise RuntimeError(f"Invalid mergerfs runtime minfreespace value: {min_free_raw!r}")
+            raise RuntimeError(
+                f"Invalid mergerfs runtime minfreespace value: {min_free_raw!r}"
+            )
         options["minfreespace"] = min_free_raw
 
     return Pool(mountpoint, branches, options, min_free_bytes, branch_reserves)
@@ -152,7 +175,9 @@ def require_mount(path: Path, runner=subprocess.run) -> None:
 def backing_source(path: Path, runner=subprocess.run) -> str:
     result = runner(
         ["findmnt", "-n", "-o", "SOURCE", "--target", str(path)],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     source = re.sub(r"\[.*\]$", "", result.stdout.strip())
     if not source:
@@ -164,11 +189,15 @@ def rotational_for_path(path: Path, runner=subprocess.run) -> bool:
     source = backing_source(path, runner)
     result = runner(
         ["lsblk", "-dn", "-o", "ROTA", source],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     value = result.stdout.strip()
     if value not in {"0", "1"}:
-        raise RuntimeError(f"Could not determine rotational status for {path}: {value!r}")
+        raise RuntimeError(
+            f"Could not determine rotational status for {path}: {value!r}"
+        )
     return value == "1"
 
 
@@ -176,7 +205,9 @@ def stat_branch(path: Path, order: int, runner=subprocess.run) -> Branch:
     info = os.statvfs(path)
     block_size = info.f_frsize or info.f_bsize
     return Branch(
-        path, order, rotational_for_path(path, runner),
+        path,
+        order,
+        rotational_for_path(path, runner),
         info.f_blocks * block_size,
         info.f_bavail * block_size,
         (info.f_blocks - info.f_bfree) * block_size,

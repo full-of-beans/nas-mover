@@ -7,10 +7,20 @@ from .sandbox import Sandbox
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Create or remove NAS mover test fixtures in a dedicated sandbox.")
-    parser.add_argument("sandbox", type=Path, help="Dedicated sandbox directory; production mounts are refused.")
-    parser.add_argument("--count", type=int, default=6, help="Number of test files to create.")
-    parser.add_argument("--cleanup", action="store_true", help="Remove only the named test files.")
+    parser = argparse.ArgumentParser(
+        description="Create or remove NAS mover test fixtures in a dedicated sandbox."
+    )
+    parser.add_argument(
+        "sandbox",
+        type=Path,
+        help="Dedicated sandbox directory; production mounts are refused.",
+    )
+    parser.add_argument(
+        "--count", type=int, default=6, help="Number of test files to create."
+    )
+    parser.add_argument(
+        "--cleanup", action="store_true", help="Remove only the named test files."
+    )
     args = parser.parse_args()
     sandbox = Sandbox(args.sandbox)
     fixtures = sandbox.fixture_paths(args.count)

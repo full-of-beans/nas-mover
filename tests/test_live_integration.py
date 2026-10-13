@@ -28,11 +28,16 @@ def test_live_sandbox_move() -> None:
     move = PlannedMove(
         Branch(source_root, 0, False, 100, 90, 10),
         Branch(destination_root, 1, True, 100, 100, 0),
-        source.relative_to(source_root), source.stat().st_size,
-        source.stat().st_atime, source.stat().st_mtime, "integration",
+        source.relative_to(source_root),
+        source.stat().st_size,
+        source.stat().st_atime,
+        source.stat().st_mtime,
+        "integration",
     )
     execute_move(move, verify="sha256")
-    assert (destination_root / "test-1.bin").read_bytes() == b"nas-mover test fixture 1\n"
+    assert (
+        destination_root / "test-1.bin"
+    ).read_bytes() == b"nas-mover test fixture 1\n"
     assert not source.exists()
     sandbox.remove_fixtures(fixtures)
     (destination_root / "test-1.bin").unlink()

@@ -19,7 +19,9 @@ def make_branch(path: Path, *, rotational: bool, order: int) -> Branch:
     return Branch(path, order, rotational, 10_000, 9_000, 1_000)
 
 
-def make_move(source: Branch, destination: Branch, name: str, content: bytes = b"payload") -> PlannedMove:
+def make_move(
+    source: Branch, destination: Branch, name: str, content: bytes = b"payload"
+) -> PlannedMove:
     source_path = source.path / name
     source_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.write_bytes(content)
@@ -69,7 +71,9 @@ def test_execute_move_cancellation_preserves_source_and_removes_partial(
     assert not list(destination.path.glob(".nas-mover.*.partial"))
 
 
-def test_execute_moves_serializes_each_hdd_and_parallelizes_distinct_hdds(tmp_path: Path) -> None:
+def test_execute_moves_serializes_each_hdd_and_parallelizes_distinct_hdds(
+    tmp_path: Path,
+) -> None:
     source = make_branch(tmp_path / "ssd", rotational=False, order=0)
     hdd1 = make_branch(tmp_path / "hdd1", rotational=True, order=1)
     hdd2 = make_branch(tmp_path / "hdd2", rotational=True, order=2)
@@ -94,7 +98,9 @@ def test_execute_moves_serializes_each_hdd_and_parallelizes_distinct_hdds(tmp_pa
         key = str(move.destination_branch.path)
         with lock:
             active_by_destination[key] = active_by_destination.get(key, 0) + 1
-            max_by_destination[key] = max(max_by_destination.get(key, 0), active_by_destination[key])
+            max_by_destination[key] = max(
+                max_by_destination.get(key, 0), active_by_destination[key]
+            )
             global_active += 1
             global_max = max(global_max, global_active)
         if move.relative_path.name in {"hdd1-a", "hdd2-a"}:
@@ -114,7 +120,9 @@ def test_execute_moves_serializes_each_hdd_and_parallelizes_distinct_hdds(tmp_pa
     assert completed.index("hdd1-a") < completed.index("hdd1-b")
 
 
-def test_execute_moves_honors_preexisting_cancellation_for_sequential_move(tmp_path: Path) -> None:
+def test_execute_moves_honors_preexisting_cancellation_for_sequential_move(
+    tmp_path: Path,
+) -> None:
     source = make_branch(tmp_path / "ssd1", rotational=False, order=0)
     destination = make_branch(tmp_path / "ssd2", rotational=False, order=1)
     move = make_move(source, destination, "file")
@@ -122,10 +130,14 @@ def test_execute_moves_honors_preexisting_cancellation_for_sequential_move(tmp_p
     cancel.set()
 
     with pytest.raises(MoveCancelled):
-        execute_moves([move], cancel_event=cancel, move_executor=lambda *_args, **_kwargs: None)
+        execute_moves(
+            [move], cancel_event=cancel, move_executor=lambda *_args, **_kwargs: None
+        )
 
 
-def test_execute_moves_honors_preexisting_cancellation_for_hdd_worker(tmp_path: Path) -> None:
+def test_execute_moves_honors_preexisting_cancellation_for_hdd_worker(
+    tmp_path: Path,
+) -> None:
     source = make_branch(tmp_path / "ssd", rotational=False, order=0)
     destination = make_branch(tmp_path / "hdd", rotational=True, order=1)
     move = make_move(source, destination, "file")
@@ -133,10 +145,14 @@ def test_execute_moves_honors_preexisting_cancellation_for_hdd_worker(tmp_path: 
     cancel.set()
 
     with pytest.raises(MoveCancelled):
-        execute_moves([move], cancel_event=cancel, move_executor=lambda *_args, **_kwargs: None)
+        execute_moves(
+            [move], cancel_event=cancel, move_executor=lambda *_args, **_kwargs: None
+        )
 
 
-def test_worker_failure_requests_cancellation_and_joins_other_workers(tmp_path: Path) -> None:
+def test_worker_failure_requests_cancellation_and_joins_other_workers(
+    tmp_path: Path,
+) -> None:
     source = make_branch(tmp_path / "ssd", rotational=False, order=0)
     hdd1 = make_branch(tmp_path / "hdd1", rotational=True, order=1)
     hdd2 = make_branch(tmp_path / "hdd2", rotational=True, order=2)
@@ -164,7 +180,11 @@ def test_signal_handlers_set_event_and_restore(monkeypatch: pytest.MonkeyPatch) 
     installed: dict[int, object] = {}
     old_handlers = {signal.SIGTERM: object(), signal.SIGINT: object()}
     monkeypatch.setattr(cli.signal, "getsignal", lambda signum: old_handlers[signum])
-    monkeypatch.setattr(cli.signal, "signal", lambda signum, handler: installed.__setitem__(signum, handler))
+    monkeypatch.setattr(
+        cli.signal,
+        "signal",
+        lambda signum, handler: installed.__setitem__(signum, handler),
+    )
     cancel = threading.Event()
 
     previous = cli._install_cancel_handlers(cancel)
@@ -182,7 +202,9 @@ def test_signal_handlers_set_event_and_restore(monkeypatch: pytest.MonkeyPatch) 
 def test_cli_main_reports_cooperative_cancellation(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(cli, "run", lambda: (_ for _ in ()).throw(MoveCancelled("stop")))
+    monkeypatch.setattr(
+        cli, "run", lambda: (_ for _ in ()).throw(MoveCancelled("stop"))
+    )
 
     assert cli.main() == 130
     assert "CANCELLED: stop" in capsys.readouterr().out

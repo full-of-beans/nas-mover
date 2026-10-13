@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import re
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from dataclasses import replace
 
-from .policy import Policy, SUPPORTED_POLICIES
+from .policy import SUPPORTED_POLICIES, Policy
 
 
 @dataclass(frozen=True)
@@ -31,12 +30,22 @@ class MoverConfig:
         with path.open("rb") as handle:
             values = tomllib.load(handle)
         unknown = set(values) - {
-            "watermark_percent", "tolerance_percent", "policy",
-            "min_file_age_hours", "extra_free_percent", "verification",
-            "fstab_path", "mount_override", "lock_path", "excluded_paths", "accounting_path",
+            "watermark_percent",
+            "tolerance_percent",
+            "policy",
+            "min_file_age_hours",
+            "extra_free_percent",
+            "verification",
+            "fstab_path",
+            "mount_override",
+            "lock_path",
+            "excluded_paths",
+            "accounting_path",
         }
         if unknown:
-            raise ValueError(f"Unknown configuration option(s): {', '.join(sorted(unknown))}")
+            raise ValueError(
+                f"Unknown configuration option(s): {', '.join(sorted(unknown))}"
+            )
         path_values = {
             "fstab_path": Path,
             "mount_override": lambda value: Path(value) if value is not None else None,
@@ -65,12 +74,21 @@ class MoverConfig:
         if self.verification not in {"size", "sha256"}:
             raise ValueError("verification must be 'size' or 'sha256'")
         for path in self.excluded_paths:
-            if path == Path(".") or path.is_absolute() or ".." in path.parts or not path.parts:
-                raise ValueError(f"Excluded paths must be relative directories/files inside a branch: {path}")
+            if (
+                path == Path(".")
+                or path.is_absolute()
+                or ".." in path.parts
+                or not path.parts
+            ):
+                raise ValueError(
+                    f"Excluded paths must be relative directories/files inside a branch: {path}"
+                )
 
 
 def parse_size(value: str) -> int:
-    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([KMGTPE]?)(?:i?B?)?\s*", value, re.IGNORECASE)
+    match = re.fullmatch(
+        r"\s*(\d+(?:\.\d+)?)\s*([KMGTPE]?)(?:i?B?)?\s*", value, re.IGNORECASE
+    )
     if not match:
         raise ValueError(f"Invalid size: {value}")
     powers = {"": 0, "K": 1, "M": 2, "G": 3, "T": 4, "P": 5, "E": 6}
